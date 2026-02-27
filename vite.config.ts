@@ -6,12 +6,7 @@ export default defineConfig({
   plugins: [react(), nodePolyfills()],
   base: './',
   optimizeDeps: {
-    esbuildOptions: {
-      external: [
-        'rpc-websockets/dist/lib/client',
-        'rpc-websockets/dist/lib/client/websocket.browser',
-      ],
-    },
+    exclude: ['rpc-websockets'],
   },
   build: {
     outDir: 'dist',
@@ -23,11 +18,11 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: {
-      '@': '/src',
-      '@solana/web3.js': '/src/shims/solana-web3.ts',
-      'rpc-websockets/dist/lib/client': '/src/shims/rpc-websockets-client.ts',
-      'rpc-websockets/dist/lib/client/websocket.browser': '/src/shims/rpc-websockets-client.ts',
-    },
+    alias: [
+      { find: '@', replacement: '/src' },
+      // Order matters: the more specific deep import must come first.
+      { find: 'rpc-websockets/dist/lib/client/websocket.browser', replacement: 'rpc-websockets/dist/lib/client/websocket.browser.cjs' },
+      { find: 'rpc-websockets/dist/lib/client', replacement: 'rpc-websockets/dist/lib/client.cjs' },
+    ],
   },
 });

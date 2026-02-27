@@ -24,7 +24,7 @@ interface PermawebLibs {
 type TurboPaymentToken = 'arweave' | 'ethereum' | 'base-eth' | 'solana';
 
 interface TurboUploadOptions {
-  file: Blob;
+  file: Blob | File;
   tags: { name: string; value: string }[];
   paymentToken: TurboPaymentToken;
 }
@@ -47,13 +47,22 @@ async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
     const provider = win?.ethereum;
     if (!provider) throw new Error('Ethereum wallet required for Turbo upload.');
     const { BrowserProvider } = await import('ethers');
-    const walletAdapter = new BrowserProvider(provider);
-    turbo = TurboFactory.authenticated({ walletAdapter, token: args.paymentToken });
+    const { InjectedEthereumSigner } = await import('@dha-team/arbundles');
+    const ethersProvider = new BrowserProvider(provider);
+    const ethersSigner = await ethersProvider.getSigner();
+    const injectedSigner = new InjectedEthereumSigner({ getSigner: () => ethersSigner as any });
+    await injectedSigner.setPublicKey();
+    turbo = TurboFactory.authenticated({ signer: injectedSigner as any, token: args.paymentToken });
   }
+
+  const fileToUpload: File =
+    typeof File !== 'undefined' && args.file instanceof File
+      ? args.file
+      : new File([args.file], 'streamvault-upload', { type: args.file.type || 'application/octet-stream' });
 
   console.info('[turbo] Uploading file', { size: args.file.size });
   const result = await turbo.uploadFile({
-    file: args.file,
+    file: fileToUpload,
     dataItemOpts: { tags: args.tags },
     events: {
       onUploadProgress: ({ totalBytes, processedBytes }) => {

@@ -26,7 +26,7 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
   const [status, setStatus] = useState<'idle' | 'uploading' | 'confirming' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<PublishResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [sampleFile, setSampleFile] = useState<File | null>(null);
+  const [sampleFile, setSampleFile] = useState<Blob | null>(null);
   const [fullFile, setFullFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [description, setDescription] = useState('');
@@ -63,8 +63,8 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
   };
 
   const handlePublish = async () => {
-    if (walletType !== 'arweave' || !address || !libs) {
-      setErrorMessage('Connect Wander (Arweave) to publish permanently.');
+    if (!address || !walletType || !libs) {
+      setErrorMessage('Connect a wallet to publish.');
       setStatus('error');
       return;
     }
@@ -74,6 +74,11 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
     try {
       let res: PublishResult;
       if (tier === 'sample') {
+        if (walletType !== 'arweave') {
+          setStatus('error');
+          setErrorMessage('Connect Wander (Arweave) to publish samples permanently.');
+          return;
+        }
         let sample = sampleFile;
         if (!sample && isAutoSample && track.streamUrl) {
           sample = await fetchSampleFromStream(track.streamUrl);
@@ -118,6 +123,10 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
             setErrorMessage('Connect the matching wallet for the selected Turbo payment option.');
             return;
           }
+        } else if (walletType !== 'arweave') {
+          setStatus('error');
+          setErrorMessage('Connect Wander (Arweave) for non-Turbo full uploads.');
+          return;
         }
         if (!useTurbo && effectiveAudio.size > 10 * 1024 * 1024) {
           setStatus('error');
@@ -377,7 +386,11 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
             )}
             {result.txId && <p className={styles.assetId}>Tx ID: {result.txId.slice(0, 12)}…</p>}
             {result.txId && (
-              <button type="button" className={styles.copyBtn} onClick={() => handleCopyTxId(result.txId)}>
+              <button
+                type="button"
+                className={styles.copyBtn}
+                onClick={() => result.txId && handleCopyTxId(result.txId)}
+              >
                 {copiedTxId ? 'Copied' : 'Copy tx id'}
               </button>
             )}
