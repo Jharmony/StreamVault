@@ -15,6 +15,7 @@ import {
 } from '../lib/audius';
 import type { Track } from '../context/PlayerContext';
 import { TrackCard } from '../components/TrackCard';
+import { LogoSpinner } from '../components/LogoSpinner';
 import { PublishModal } from '../components/PublishModal';
 import styles from './Home.module.css';
 import { useWallet } from '../context/WalletContext';
@@ -343,7 +344,7 @@ export function Home() {
       </section>
 
       {loading ? (
-        <div className={styles.loading}>Loading…</div>
+        <LogoSpinner />
       ) : (
         <section className={styles.grid}>
           {tracks.map((track) => (

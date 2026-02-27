@@ -27,6 +27,19 @@
 
 .logo {
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.logoMark {
+  width: 84px;
+  height: 84px;
+  object-fit: contain;
+}
+
+.logoTextGroup {
+  display: flex;
   flex-direction: column;
   gap: 2px;
 }

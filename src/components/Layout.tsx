@@ -15,8 +15,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <header className={styles.header}>
         <div className={styles.headerInner}>
           <Link to="/" className={styles.logo}>
-            <span className={styles.logoText}>StreamVault</span>
-            <span className={styles.tagline}>Stream anywhere. Preserve forever.</span>
+            <img
+              src="/streamvault-logo.png"
+              alt="StreamVault"
+              className={styles.logoMark}
+            />
+            <div className={styles.logoTextGroup}>
+              <span className={styles.logoText}>StreamVault</span>
+              <span className={styles.tagline}>Stream anywhere. Preserve forever.</span>
+            </div>
           </Link>
           <nav className={styles.nav}>
             <Link to="/" className={styles.navLink}>Discover</Link>

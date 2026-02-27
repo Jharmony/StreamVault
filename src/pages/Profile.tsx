@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useWallet } from '../context/WalletContext';
 import { usePermaweb } from '../context/PermawebContext';
 import { useAudiusAuth } from '../context/AudiusAuthContext';
+import { LogoSpinner } from '../components/LogoSpinner';
 import { searchUsers, type AudiusUser } from '../lib/audius';
 import { CreateProfileModal } from '../components/CreateProfileModal';
 import styles from './Profile.module.css';
@@ -526,7 +527,7 @@ export function Profile() {
         {walletType !== 'arweave' ? (
           <p className={styles.subtext}>Connect <strong>Wander</strong> to create and manage your permaweb profile.</p>
         ) : loading ? (
-          <p className={styles.subtext}>Loading profile…</p>
+          <LogoSpinner />
         ) : error ? (
           <p className={styles.error}>{error}</p>
         ) : normalizedProfile?.id ? (

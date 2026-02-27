@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { getUserById, getUserTracks, getStreamUrl, getArtworkUrl, type AudiusTrack } from '../lib/audius';
 import type { Track } from '../context/PlayerContext';
 import { TrackCard } from '../components/TrackCard';
+import { LogoSpinner } from '../components/LogoSpinner';
 import { PublishModal } from '../components/PublishModal';
 import styles from './Artist.module.css';
 
@@ -45,7 +46,7 @@ export function Artist() {
     return () => { cancelled = true; };
   }, [id]);
 
-  if (loading) return <div className={styles.loading}>Loading…</div>;
+  if (loading) return <LogoSpinner />;
   if (!user) return <div className={styles.loading}>Artist not found.</div>;
 
   return (
