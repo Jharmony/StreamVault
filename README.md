@@ -40,6 +40,20 @@ npm run build
 
 Output is in `dist/`. The app uses `base: './'` and **HashRouter** so it works when deployed to a static host or Arweave.
 
+## Branch workflow & going live
+
+- **`main`** — production; what's live. Deploy from here (e.g. Vercel production).
+- **`develop`** — day-to-day development. Do your work here, then open a **Pull Request** into `main` when ready to release.
+- **Flow:** branch off `develop` for features → merge to `develop` → PR `develop` → `main` → production updates.
+
+## Deploy to Vercel
+
+1. Push your repo to GitHub (e.g. `https://github.com/Jharmony/StreamVault`).
+2. Go to [vercel.com](https://vercel.com) → **Add New Project** → **Import** your GitHub repo.
+3. Leave defaults (Vite is auto-detected; build: `npm run build`, output: `dist`). Or use the included `vercel.json`.
+4. Add environment variables if needed (e.g. `VITE_AUDIUS_API_KEY`, `VITE_AO`) in **Project → Settings → Environment Variables**.
+5. **Deploy**. Your site will be at `https://your-project.vercel.app`. Production deploys run on every push to `main` (or the branch you set as Production).
+
 ## Deploy to Arweave (perma-app)
 
 1. Build: `npm run build`
