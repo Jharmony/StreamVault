@@ -1,0 +1,149 @@
+.section {
+  padding: 24px;
+  background: var(--bg-glass);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--bg-glass-border);
+  margin-bottom: 24px;
+}
+
+.sectionTitle {
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.text {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.clipList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.clipRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--bg-glass-border);
+}
+
+.clipOrder {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+  min-width: 24px;
+}
+
+.clipTitle {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clipActions {
+  display: flex;
+  gap: 4px;
+}
+
+.smallBtn {
+  padding: 4px 8px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--bg-glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.smallBtn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.smallBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fileLabel {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+.fileLabel input {
+  margin-left: 8px;
+}
+
+.actions {
+  margin-bottom: 12px;
+}
+
+.primaryBtn {
+  padding: 10px 16px;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.primaryBtn:hover:not(:disabled) {
+  opacity: 0.92;
+}
+.primaryBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.secondaryBtn {
+  padding: 10px 16px;
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--bg-glass-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  margin-left: 8px;
+}
+.secondaryBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.error {
+  font-size: var(--text-sm);
+  color: var(--error);
+  margin-bottom: 12px;
+}
+
+.result {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--bg-glass-border);
+}
+
+.resultLabel {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}

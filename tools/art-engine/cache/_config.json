@@ -1,0 +1,31 @@
+{
+  "cachePath": "/Users/perse/Documents/dapps/streamvault/tools/art-engine/cache",
+  "outputPath": "/Users/perse/Documents/dapps/streamvault/tools/art-engine/output",
+  "useCache": false,
+  "inputs": {
+    "audioClips": {
+      "basePath": "/Users/perse/Documents/dapps/streamvault/tools/art-engine/data/audio-clips",
+      "cachePath": "/Users/perse/Documents/dapps/streamvault/tools/art-engine/cache/audio-clips-downloads",
+      "seed": ""
+    }
+  },
+  "generators": [
+    {
+      "seed": "",
+      "startIndex": 1,
+      "endIndex": 5,
+      "minClips": 4,
+      "maxClips": 10
+    }
+  ],
+  "renderers": [
+    {
+      "cachePath": ""
+    }
+  ],
+  "exporters": [
+    {
+      "outputPath": ""
+    }
+  ]
+}

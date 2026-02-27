@@ -1,0 +1,27 @@
+{
+  "name": "streamvault-art-engine",
+  "version": "1.0.0",
+  "description": "Hashlips Art Engine 2.0 for generating cover art for StreamVault. Add layers to data/, run npm run start, then use output/images/ when publishing in the app.",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "rm -rf ./dist && tsc && node dist/index.js",
+    "build": "rm -rf ./dist && tsc",
+    "start:audio": "rm -rf ./dist && tsc && node dist/index-audio.js"
+  },
+  "keywords": [
+    "art-engine",
+    "generative",
+    "nft",
+    "streamvault",
+    "cover-art"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@hashlips-lab/art-engine": "^2.0.0-alpha7",
+    "ffmpeg-static": "^5.3.0",
+    "typescript": "^5.9.3"
+  }
+}
