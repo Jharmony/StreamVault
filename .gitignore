@@ -23,3 +23,7 @@ dflow_phantom-connect-skill-main.zip
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Local design assets (already copied into /public)
+streamvault_favicon_512.png
+streamvaultlogo.png

@@ -64,23 +64,29 @@ export function AudiusAuthProvider({ children }: { children: React.ReactNode }) 
     (async () => {
       try {
         const { sdk } = await import('@audius/sdk');
+        const appName = import.meta.env?.VITE_AUDIUS_APP_NAME ?? 'StreamVault';
         const audiusSdk = sdk({
           apiKey: apiKey.trim(),
-          appName: import.meta.env.VITE_AUDIUS_APP_NAME || 'StreamVault',
+          appName,
         });
         if (!audiusSdk.oauth) {
           console.error('[AudiusAuth] OAuth not available');
           return;
         }
         audiusSdk.oauth.init({
-          successCallback: (profile: AudiusAuthUser, _encodedJwt: string) => {
+          // Audius SDK types use a decoded JWT profile where userId/sub may be strings.
+          successCallback: (profile: any, _encodedJwt: string) => {
+            const rawUserId = profile?.userId ?? profile?.sub;
+            const rawSub = profile?.sub ?? profile?.userId;
+            const userId = Number(rawUserId);
+            const sub = Number(rawSub);
             const user: AudiusAuthUser = {
-              userId: profile.userId ?? profile.sub,
-              sub: profile.sub ?? profile.userId,
-              handle: profile.handle ?? '',
-              name: profile.name ?? '',
+              userId: Number.isFinite(userId) ? userId : 0,
+              sub: Number.isFinite(sub) ? sub : Number.isFinite(userId) ? userId : 0,
+              handle: String(profile?.handle ?? ''),
+              name: String(profile?.name ?? ''),
               email: profile.email,
-              verified: profile.verified ?? false,
+              verified: Boolean(profile?.verified),
               profilePicture: profile.profilePicture ?? null,
               iat: profile.iat,
             };

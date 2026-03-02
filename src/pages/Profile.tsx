@@ -14,6 +14,7 @@ type PermaProfile = {
   username?: string;
   displayName?: string;
   description?: string;
+  audiusHandle?: string;
   thumbnail?: string | null;
   banner?: string | null;
   assets?: any[];
@@ -224,13 +225,14 @@ export function Profile() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!profile?.audiusHandle) {
+    const handle = profile?.audiusHandle;
+    if (!handle) {
       setAudiusProfile(null);
       return;
     }
     (async () => {
       try {
-        const results = await searchUsers(profile.audiusHandle, 1);
+        const results = await searchUsers(handle, 1);
         if (!cancelled) setAudiusProfile(results[0] || null);
       } catch {
         if (!cancelled) setAudiusProfile(null);
@@ -584,7 +586,7 @@ export function Profile() {
         </p>
         {profileOptions.length > 0 && (
           <div className={styles.profileList}>
-            {profileOptions.map((option, index) => (
+            {profileOptions.map((option) => (
               <div key={option.id} className={styles.profileListItem}>
                 <div>
                   <span className={styles.mono}>Profile ID</span>

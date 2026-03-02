@@ -21,10 +21,10 @@ interface PermawebLibs {
   }) => Promise<string>;
 }
 
-type TurboPaymentToken = 'arweave' | 'ethereum' | 'base-eth' | 'solana';
+type TurboPaymentToken = 'arweave' | 'ethereum' | 'base-eth' | 'solana' | 'base-usdc' | 'base-ario' | 'polygon-usdc' | 'pol';
 
 interface TurboUploadOptions {
-  file: Blob;
+  file: Blob | File;
   tags: { name: string; value: string }[];
   paymentToken: TurboPaymentToken;
 }
@@ -47,13 +47,22 @@ async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
     const provider = win?.ethereum;
     if (!provider) throw new Error('Ethereum wallet required for Turbo upload.');
     const { BrowserProvider } = await import('ethers');
-    const walletAdapter = new BrowserProvider(provider);
-    turbo = TurboFactory.authenticated({ walletAdapter, token: args.paymentToken });
+    const { InjectedEthereumSigner } = await import('@dha-team/arbundles');
+    const ethersProvider = new BrowserProvider(provider);
+    const ethersSigner = await ethersProvider.getSigner();
+    const injectedSigner = new InjectedEthereumSigner({ getSigner: () => ethersSigner as any });
+    await injectedSigner.setPublicKey();
+    turbo = TurboFactory.authenticated({ signer: injectedSigner as any, token: args.paymentToken });
   }
+
+  const fileToUpload: File =
+    typeof File !== 'undefined' && args.file instanceof File
+      ? args.file
+      : new File([args.file], 'streamvault-upload', { type: args.file.type || 'application/octet-stream' });
 
   console.info('[turbo] Uploading file', { size: args.file.size });
   const result = await turbo.uploadFile({
-    file: args.file,
+    file: fileToUpload,
     dataItemOpts: { tags: args.tags },
     events: {
       onUploadProgress: ({ totalBytes, processedBytes }) => {
@@ -70,6 +79,57 @@ async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
 
   return result.id;
 }
+
+/**
+ * Open a Stripe Checkout session to top up Turbo credits with Fiat.
+ *
+ * Calls the Turbo payment REST API directly to avoid pulling in the full
+ * SDK import chain (which drags in rpc-websockets and other heavy deps)
+ * just to generate a redirect URL. The endpoint is a simple authenticated
+ * GET that returns a paymentSession.url.
+ *
+ * Docs: https://payment.ardrive.io/api-docs (top-up/checkout-session)
+ */
+export async function createFiatTopUpSession(args: {
+  amountUsd: number;
+  ownerAddress: string;
+}): Promise<string> {
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
+
+  // Turbo's payment API rejects localhost URLs — use a real public URL as fallback.
+  const returnBase = isLocalhost ? 'https://ardrive.io' : origin;
+  const successUrl = encodeURIComponent(`${returnBase}/`);
+  const cancelUrl = encodeURIComponent(`${returnBase}/`);
+
+  // Amount is in cents — $10 = 1000
+  const amountCents = Math.round(args.amountUsd * 100);
+
+  const url =
+    `https://payment.ardrive.io/v1/top-up/checkout-session/${args.ownerAddress}/usd/${amountCents}` +
+    `?token=arweave&uiMode=hosted&successUrl=${successUrl}&cancelUrl=${cancelUrl}`;
+
+  console.info('[publish] Fetching Turbo checkout session', { amountCents, owner: args.ownerAddress });
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Turbo payment API error (${res.status}): ${text}`);
+  }
+
+  const json = await res.json();
+  const checkoutUrl: string | null = json?.paymentSession?.url ?? json?.url ?? null;
+
+  if (!checkoutUrl) {
+    console.error('[publish] Unexpected checkout session response', json);
+    throw new Error('Turbo did not return a checkout URL. Please try again.');
+  }
+
+  return checkoutUrl;
+}
+
+
 
 /** Upload raw data transaction. Returns txId or throws. */
 async function uploadDataTx(
@@ -155,7 +215,10 @@ export async function publishSampleToArweave(
       args.sample.type || 'audio/mpeg',
       [
         { name: 'App-Name', value: 'StreamVault' },
+        { name: 'Protocol', value: 'StreamVault' },
+        { name: 'App-Version', value: '1.0.0' },
         { name: 'Type', value: 'audio-sample' },
+        { name: 'Content-Type', value: args.sample.type || 'audio/mpeg' },
         { name: 'Title', value: args.title },
         { name: 'Artist', value: args.artist },
         { name: 'Duration-Seconds', value: String(args.durationSeconds) },
@@ -206,10 +269,13 @@ export async function publishFullAsAtomicAsset(
         file: args.audio,
         tags: [
           { name: 'App-Name', value: 'StreamVault' },
+          { name: 'Protocol', value: 'StreamVault' },
+          { name: 'App-Version', value: '1.0.0' },
           { name: 'Type', value: 'audio-full' },
+          { name: 'Content-Type', value: args.audio.type || 'audio/mpeg' },
           { name: 'Title', value: args.title },
           { name: 'Artist', value: args.artist },
-          { name: 'Content-Type', value: args.audio.type || 'audio/mpeg' },
+          { name: 'Creator', value: creatorAddress },
         ],
         paymentToken: args.turboPaymentToken || 'arweave',
       });
@@ -222,9 +288,13 @@ export async function publishFullAsAtomicAsset(
         args.audio.type || 'audio/mpeg',
         [
           { name: 'App-Name', value: 'StreamVault' },
+          { name: 'Protocol', value: 'StreamVault' },
+          { name: 'App-Version', value: '1.0.0' },
           { name: 'Type', value: 'audio-full' },
+          { name: 'Content-Type', value: args.audio.type || 'audio/mpeg' },
           { name: 'Title', value: args.title },
           { name: 'Artist', value: args.artist },
+          { name: 'Creator', value: creatorAddress },
         ]
       );
     }
