@@ -21,8 +21,8 @@ export function PermawebProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const wallet = (typeof window !== 'undefined' && (window as any).arweaveWallet) || null;
-    const muUrl = (import.meta.env.VITE_AO_MU_URL as string | undefined) || 'https://push.forward.computer';
-    const cuUrl = (import.meta.env.VITE_AO_CU_URL as string | undefined) || 'https://forward.computer';
+    const muUrl = (import.meta.env.VITE_AO_MU_URL as string | undefined) || 'https://mu.ao-testnet.xyz';
+    const cuUrl = (import.meta.env.VITE_AO_CU_URL as string | undefined) || 'https://cu.ao-testnet.xyz';
     const gatewayUrl = (import.meta.env.VITE_AO_GATEWAY_URL as string | undefined) || 'https://arweave.net';
     const gqlUrl =
       (import.meta.env.VITE_AO_GQL_URL as string | undefined) ||

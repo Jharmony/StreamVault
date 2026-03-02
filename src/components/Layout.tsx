@@ -2,6 +2,8 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { useWallet } from '../context/WalletContext';
 import { useAudiusAuth } from '../context/AudiusAuthContext';
+import { createPortal } from 'react-dom';
+import { PublishModal } from './PublishModal';
 import styles from './Layout.module.css';
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -9,6 +11,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { audiusUser, login, logout, apiKeyConfigured } = useAudiusAuth();
   const [showWalletMenu, setShowWalletMenu] = React.useState(false);
   const [showAudiusMenu, setShowAudiusMenu] = React.useState(false);
+  const [isPublishOpen, setIsPublishOpen] = React.useState(false);
 
   return (
     <div className={styles.layout}>
@@ -58,6 +61,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 )}
               </div>
             )}
+            <button
+              type="button"
+              className={styles.walletBtn}
+              onClick={() => setIsPublishOpen(true)}
+              style={{ padding: '0 12px', background: 'var(--accent-color)' }}
+            >
+              Upload
+            </button>
             <div className={styles.walletWrap}>
               <button
                 type="button"
@@ -100,6 +111,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <main className={styles.main}>{children}</main>
+
+      {isPublishOpen && typeof document !== 'undefined'
+        ? createPortal(
+          <PublishModal
+            onClose={() => setIsPublishOpen(false)}
+            onSuccess={() => setIsPublishOpen(false)}
+          />,
+          document.body
+        )
+        : null}
     </div>
   );
 }
