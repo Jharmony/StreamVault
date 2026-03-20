@@ -91,8 +91,7 @@
 .walletBtnContent {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  max-width: 180px;
+  justify-content: center;
 }
 
 .walletBtnLabel {
@@ -103,12 +102,26 @@
 }
 
 .walletAvatar {
-  width: 22px;
-  height: 22px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   object-fit: cover;
   border: 1px solid var(--bg-glass-border);
   flex-shrink: 0;
+}
+
+.walletAvatarFallback {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(127, 92, 255, 0.9), rgba(69, 192, 255, 0.8));
+  color: white;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .walletBtn:hover:not(:disabled) {
@@ -153,6 +166,18 @@
   font-size: var(--text-xs);
   color: var(--text-muted);
   text-transform: capitalize;
+}
+
+.walletMenuError {
+  font-size: var(--text-xs);
+  color: var(--error);
+  white-space: normal;
+}
+
+.walletMenuStatus {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: normal;
 }
 
 .walletMenuSection {
