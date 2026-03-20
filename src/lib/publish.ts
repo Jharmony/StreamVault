@@ -4,6 +4,8 @@
  */
 
 import type { PublishResult } from '../lib/arweave';
+import type { UdlConfig, RoyaltySplit } from './udl';
+import { registerTrackOnAO } from './aoMusicRegistry';
 
 const GATEWAY = 'https://arweave.net';
 const AR_IO_GATEWAY = 'https://ar-io.net';
@@ -18,13 +20,14 @@ interface PermawebLibs {
     contentType: string;
     assetType: string;
     metadata?: Record<string, unknown>;
+    tags?: { name: string; value: string }[];
   }) => Promise<string>;
 }
 
-type TurboPaymentToken = 'arweave' | 'ethereum' | 'base-eth' | 'solana';
+type TurboPaymentToken = 'arweave' | 'ethereum' | 'base-eth' | 'solana' | 'base-usdc' | 'base-ario' | 'polygon-usdc' | 'pol';
 
 interface TurboUploadOptions {
-  file: Blob;
+  file: Blob | File;
   tags: { name: string; value: string }[];
   paymentToken: TurboPaymentToken;
 }
@@ -47,13 +50,25 @@ async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
     const provider = win?.ethereum;
     if (!provider) throw new Error('Ethereum wallet required for Turbo upload.');
     const { BrowserProvider } = await import('ethers');
-    const walletAdapter = new BrowserProvider(provider);
-    turbo = TurboFactory.authenticated({ walletAdapter, token: args.paymentToken });
+    const { InjectedEthereumSigner } = await import('@dha-team/arbundles');
+    const ethersProvider = new BrowserProvider(provider);
+    const ethersSigner = await ethersProvider.getSigner();
+    const injectedSigner = new InjectedEthereumSigner({ getSigner: () => ethersSigner as any });
+    await injectedSigner.setPublicKey();
+    turbo = TurboFactory.authenticated({ signer: injectedSigner as any, token: args.paymentToken });
   }
 
+  const fileToUpload: File =
+    typeof File !== 'undefined' && args.file instanceof File
+      ? args.file
+      : new File([args.file], 'streamvault-upload', { type: args.file.type || 'application/octet-stream' });
+
   console.info('[turbo] Uploading file', { size: args.file.size });
+  // #region agent log
+  fetch('http://127.0.0.1:7939/ingest/0b5e774a-21c9-48b0-b426-076405dcd7ec',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'935ac8'},body:JSON.stringify({sessionId:'935ac8',runId:'pre-fix',hypothesisId:'H1',location:'src/lib/publish.ts:66',message:'turbo-upload-start',data:{paymentToken:args.paymentToken,fileSize:args.file.size},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion agent log
   const result = await turbo.uploadFile({
-    file: args.file,
+    file: fileToUpload,
     dataItemOpts: { tags: args.tags },
     events: {
       onUploadProgress: ({ totalBytes, processedBytes }) => {
@@ -70,6 +85,57 @@ async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
 
   return result.id;
 }
+
+/**
+ * Open a Stripe Checkout session to top up Turbo credits with Fiat.
+ *
+ * Calls the Turbo payment REST API directly to avoid pulling in the full
+ * SDK import chain (which drags in rpc-websockets and other heavy deps)
+ * just to generate a redirect URL. The endpoint is a simple authenticated
+ * GET that returns a paymentSession.url.
+ *
+ * Docs: https://payment.ardrive.io/api-docs (top-up/checkout-session)
+ */
+export async function createFiatTopUpSession(args: {
+  amountUsd: number;
+  ownerAddress: string;
+}): Promise<string> {
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
+
+  // Turbo's payment API rejects localhost URLs — use a real public URL as fallback.
+  const returnBase = isLocalhost ? 'https://ardrive.io' : origin;
+  const successUrl = encodeURIComponent(`${returnBase}/`);
+  const cancelUrl = encodeURIComponent(`${returnBase}/`);
+
+  // Amount is in cents — $10 = 1000
+  const amountCents = Math.round(args.amountUsd * 100);
+
+  const url =
+    `https://payment.ardrive.io/v1/top-up/checkout-session/${args.ownerAddress}/usd/${amountCents}` +
+    `?token=arweave&uiMode=hosted&successUrl=${successUrl}&cancelUrl=${cancelUrl}`;
+
+  console.info('[publish] Fetching Turbo checkout session', { amountCents, owner: args.ownerAddress });
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Turbo payment API error (${res.status}): ${text}`);
+  }
+
+  const json = await res.json();
+  const checkoutUrl: string | null = json?.paymentSession?.url ?? json?.url ?? null;
+
+  if (!checkoutUrl) {
+    console.error('[publish] Unexpected checkout session response', json);
+    throw new Error('Turbo did not return a checkout URL. Please try again.');
+  }
+
+  return checkoutUrl;
+}
+
+
 
 /** Upload raw data transaction. Returns txId or throws. */
 async function uploadDataTx(
@@ -155,7 +221,10 @@ export async function publishSampleToArweave(
       args.sample.type || 'audio/mpeg',
       [
         { name: 'App-Name', value: 'StreamVault' },
+        { name: 'Protocol', value: 'StreamVault' },
+        { name: 'App-Version', value: '1.0.0' },
         { name: 'Type', value: 'audio-sample' },
+        { name: 'Content-Type', value: args.sample.type || 'audio/mpeg' },
         { name: 'Title', value: args.title },
         { name: 'Artist', value: args.artist },
         { name: 'Duration-Seconds', value: String(args.durationSeconds) },
@@ -181,6 +250,8 @@ export async function publishFullAsAtomicAsset(
     artworkUrl?: string;
     artworkFile?: Blob;
     royaltiesBps?: number;
+    udl?: UdlConfig;
+    splits?: RoyaltySplit[];
     useTurbo?: boolean;
     turboPaymentToken?: TurboPaymentToken;
   },
@@ -192,6 +263,8 @@ export async function publishFullAsAtomicAsset(
 
   try {
     console.info('[publish] Full asset publish started', { title: args.title, artist: args.artist });
+    const udl = args.udl;
+    const splits = args.splits;
     let artworkUrlToUse = args.artworkUrl;
     if (args.artworkFile) {
       console.info('[publish] Uploading cover image to Arweave');
@@ -201,18 +274,67 @@ export async function publishFullAsAtomicAsset(
       ]);
     }
     let txId: string;
+    const baseTags: { name: string; value: string }[] = [
+      { name: 'App-Name', value: 'StreamVault' },
+      { name: 'Protocol', value: 'StreamVault' },
+      { name: 'App-Version', value: '1.0.0' },
+      { name: 'Type', value: 'audio-full' },
+      { name: 'Content-Type', value: args.audio.type || 'audio/mpeg' },
+      { name: 'Title', value: args.title },
+      { name: 'Artist', value: args.artist },
+      { name: 'Creator', value: creatorAddress },
+    ];
+
+    if (udl) {
+      baseTags.push(
+        { name: 'License', value: udl.licenseId },
+        ...(udl.uri ? [{ name: 'License-URI', value: udl.uri }] : []),
+        { name: 'License-Use', value: udl.usage.join(',') },
+        { name: 'License-AI-Use', value: udl.aiUse },
+        { name: 'License-Fee', value: udl.fee },
+        { name: 'License-Fee-Unit', value: udl.interval },
+        { name: 'License-Currency', value: udl.currency },
+        ...(udl.attribution ? [{ name: 'License-Attribution', value: udl.attribution }] : []),
+        ...(udl.jurisdiction ? [{ name: 'License-Jurisdiction', value: udl.jurisdiction }] : []),
+      );
+    }
+
+    if (splits && splits.length > 0) {
+      baseTags.push({ name: 'Royalties-Splits', value: JSON.stringify(splits) });
+    }
+
     if (args.useTurbo) {
-      txId = await uploadWithTurbo({
-        file: args.audio,
-        tags: [
-          { name: 'App-Name', value: 'StreamVault' },
-          { name: 'Type', value: 'audio-full' },
-          { name: 'Title', value: args.title },
-          { name: 'Artist', value: args.artist },
-          { name: 'Content-Type', value: args.audio.type || 'audio/mpeg' },
-        ],
-        paymentToken: args.turboPaymentToken || 'arweave',
-      });
+      try {
+        txId = await uploadWithTurbo({
+          file: args.audio,
+          tags: baseTags,
+          paymentToken: args.turboPaymentToken || 'arweave',
+        });
+      } catch (e: any) {
+        const msg = String(e?.message || e || '');
+        // #region agent log
+        fetch('http://127.0.0.1:7939/ingest/0b5e774a-21c9-48b0-b426-076405dcd7ec',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'935ac8'},body:JSON.stringify({sessionId:'935ac8',runId:'pre-fix',hypothesisId:'H2',location:'src/lib/publish.ts:304',message:'turbo-upload-error',data:{message:msg,audioSize:args.audio.size},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion agent log
+        const isGatewayIssue =
+          msg.includes('getPrice') ||
+          msg.includes('Bad Gateway') ||
+          msg.includes('502') ||
+          msg.includes('Website is offline');
+        if (isGatewayIssue && args.audio.size <= 10 * 1024 * 1024) {
+          // Fallback: try direct Arweave upload so creators can still publish when Turbo is down.
+          // #region agent log
+          fetch('http://127.0.0.1:7939/ingest/0b5e774a-21c9-48b0-b426-076405dcd7ec',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'935ac8'},body:JSON.stringify({sessionId:'935ac8',runId:'pre-fix',hypothesisId:'H3',location:'src/lib/publish.ts:318',message:'turbo-fallback-to-direct-arweave',data:{audioSize:args.audio.size},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion agent log
+          const data = await args.audio.arrayBuffer();
+          txId = await uploadDataTx(
+            data,
+            args.audio.type || 'audio/mpeg',
+            baseTags
+          );
+        } else {
+          throw e;
+        }
+      }
     } else {
       const data = await args.audio.arrayBuffer();
       if (data.byteLength > 10 * 1024 * 1024) return { success: false, error: 'File too large (max ~10MB).' };
@@ -220,23 +342,47 @@ export async function publishFullAsAtomicAsset(
       txId = await uploadDataTx(
         data,
         args.audio.type || 'audio/mpeg',
-        [
-          { name: 'App-Name', value: 'StreamVault' },
-          { name: 'Type', value: 'audio-full' },
-          { name: 'Title', value: args.title },
-          { name: 'Artist', value: args.artist },
-        ]
+        baseTags
       );
     }
     const confirmed = await waitForConfirmation(txId).catch(() => false);
     const permawebUrl = `${GATEWAY}/${txId}`;
 
-    const metadata = {
+    const metadata: Record<string, unknown> = {
       audioTxId: txId,
       artist: args.artist,
       artwork: artworkUrlToUse || undefined,
       royaltiesBps: args.royaltiesBps ?? undefined,
     };
+    if (udl) metadata.udl = udl;
+    if (splits && splits.length > 0) metadata.splits = splits;
+
+    const assetTags: { name: string; value: string }[] = [
+      { name: 'App-Name', value: 'StreamVault' },
+      { name: 'Protocol', value: 'StreamVault' },
+      { name: 'App-Version', value: '1.0.0' },
+      { name: 'Type', value: 'music-atomic-asset' },
+      { name: 'Track-AudioTx', value: txId },
+      { name: 'Artist', value: args.artist },
+      { name: 'Creator', value: creatorAddress },
+    ];
+
+    if (udl) {
+      assetTags.push(
+        { name: 'License', value: udl.licenseId },
+        ...(udl.uri ? [{ name: 'License-URI', value: udl.uri }] : []),
+        { name: 'License-Use', value: udl.usage.join(',') },
+        { name: 'License-AI-Use', value: udl.aiUse },
+        { name: 'License-Fee', value: udl.fee },
+        { name: 'License-Fee-Unit', value: udl.interval },
+        { name: 'License-Currency', value: udl.currency },
+      );
+    }
+
+    if (splits && splits.length > 0) {
+      assetTags.push({ name: 'Royalties-Splits', value: JSON.stringify(splits) });
+    }
+
     const assetId = await libs.createAtomicAsset({
       name: args.title,
       description: args.description || `Permanent release by ${args.artist}`,
@@ -246,9 +392,27 @@ export async function publishFullAsAtomicAsset(
       contentType: 'text/plain',
       assetType: 'audio',
       metadata,
+      tags: assetTags,
     });
 
     console.info('[publish] Full asset publish complete', { txId, assetId, permawebUrl });
+
+    // Best-effort AO registration for discovery and royalty engine usage.
+    try {
+      await registerTrackOnAO({
+        assetId,
+        audioTxId: txId,
+        creator: creatorAddress,
+        udl,
+        splits,
+        tags: {
+          Title: args.title,
+          Artist: args.artist,
+        },
+      });
+    } catch (e) {
+      console.warn('[publish] Failed to register track on AO MusicRegistry', e);
+    }
     return {
       success: true,
       txId,

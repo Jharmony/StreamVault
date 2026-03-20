@@ -18,7 +18,9 @@
   border-radius: var(--radius-xl);
   max-height: calc(100vh - 120px);
   overflow-y: auto;
+  position: relative;
 }
+
 
 .header {
   display: flex;

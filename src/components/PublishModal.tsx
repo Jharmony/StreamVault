@@ -8,34 +8,49 @@ import {
   PublishTier,
   type PublishResult,
 } from '../lib/arweave';
-import { publishSampleToArweave, publishFullAsAtomicAsset } from '../lib/publish';
+import { getSelectedOrLatestProfileByWallet } from '../lib/permaProfile';
+import { publishSampleToArweave, publishFullAsAtomicAsset, createFiatTopUpSession } from '../lib/publish';
+import type { UdlConfig, RoyaltySplit, UdlAiUse } from '../lib/udl';
 import styles from './PublishModal.module.css';
 
 interface PublishModalProps {
-  track: Track;
+  track?: Track;
   onClose: () => void;
   onSuccess?: (result: PublishResult) => void;
 }
 
 export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
   const { libs } = usePermaweb();
-  const { address, walletType } = useWallet();
+  const { address, walletType, connect, isConnecting } = useWallet();
   const { generatedCover, clearGeneratedCover } = useGeneratedCover();
   const { generatedAudio, clearGeneratedAudio } = useGeneratedAudio();
-  const [tier, setTier] = useState<PublishTier>('sample');
+  const [tier, setTier] = useState<PublishTier>(track ? 'sample' : 'full');
   const [status, setStatus] = useState<'idle' | 'uploading' | 'confirming' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<PublishResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [sampleFile, setSampleFile] = useState<File | null>(null);
+  const [sampleFile, setSampleFile] = useState<Blob | null>(null);
   const [fullFile, setFullFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [description, setDescription] = useState('');
   const [royaltiesBps, setRoyaltiesBps] = useState<number>(500);
   const [useTurbo, setUseTurbo] = useState(false);
-  const [turboToken, setTurboToken] = useState<'arweave' | 'ethereum' | 'base-eth' | 'solana'>('arweave');
+  const [turboToken, setTurboToken] = useState<'arweave' | 'ethereum' | 'base-eth' | 'solana' | 'base-usdc' | 'base-ario' | 'polygon-usdc' | 'pol'>('arweave');
   const [isAutoSample, setIsAutoSample] = useState(true);
   const [copiedTxId, setCopiedTxId] = useState(false);
   const [appendWarning, setAppendWarning] = useState<string | null>(null);
+  const [fiatAmount, setFiatAmount] = useState<string>('10');
+  const [isTopUpLoading, setIsTopUpLoading] = useState(false);
+  const [showWalletChooser, setShowWalletChooser] = useState(false);
+
+  // Simple UDL controls
+  const [licenseUsePreset, setLicenseUsePreset] = useState<'stream' | 'stream-download' | 'stream-download-commercial'>('stream');
+  const [aiUse, setAiUse] = useState<UdlAiUse>('deny');
+  const [licenseFee, setLicenseFee] = useState<string>('0');
+  const [licenseCurrency, setLicenseCurrency] = useState<string>('MATIC');
+
+  // New states for global upload where track is undefined
+  const [customTitle, setCustomTitle] = useState(track?.title || '');
+  const [customArtist, setCustomArtist] = useState(track?.artist || '');
 
   const SAMPLE_MAX_BYTES = 100 * 1024;
 
@@ -46,6 +61,28 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
       window.setTimeout(() => setCopiedTxId(false), 1500);
     } catch (e) {
       console.warn('[publish] Clipboard copy failed', e);
+    }
+  };
+
+  const handleFiatTopUp = async () => {
+    if (!address) {
+      setErrorMessage('Connect a wallet first to use as the top-up destination.');
+      return;
+    }
+    const amount = parseInt(fiatAmount, 10);
+    if (isNaN(amount) || amount < 5) {
+      setErrorMessage('Top-up amount must be at least $5.');
+      return;
+    }
+    try {
+      setIsTopUpLoading(true);
+      setErrorMessage(null);
+      const url = await createFiatTopUpSession({ amountUsd: amount, ownerAddress: address });
+      window.location.href = url;
+    } catch (e: any) {
+      setErrorMessage(e?.message || 'Failed to initialize Stripe checkout.');
+    } finally {
+      setIsTopUpLoading(false);
     }
   };
 
@@ -62,10 +99,69 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
     return new Blob([data.slice(0, maxBytes)], { type: contentType });
   };
 
+  const buildUdlConfig = (): UdlConfig => {
+    const usage =
+      licenseUsePreset === 'stream'
+        ? ['stream']
+        : licenseUsePreset === 'stream-download'
+          ? ['stream', 'download']
+          : ['stream', 'download', 'commercial-sync'];
+
+    const fee = licenseFee.trim() || '0';
+
+    return {
+      licenseId: 'udl://music/1.0',
+      uri: (import.meta as any).env?.VITE_UDL_LICENSE_URI || undefined,
+      usage,
+      aiUse,
+      fee,
+      currency: licenseCurrency || 'MATIC',
+      interval: 'per-stream',
+      attribution: 'required',
+    };
+  };
+
+  const buildDefaultSplits = (): RoyaltySplit[] => {
+    if (!address) return [];
+    let chain: RoyaltySplit['chain'] = 'arweave';
+    let token = 'AR';
+
+    if (useTurbo) {
+      if (turboToken === 'base-eth' || turboToken === 'base-usdc' || turboToken === 'base-ario') {
+        chain = 'base';
+        token = turboToken === 'base-eth' ? 'ETH' : turboToken === 'base-usdc' ? 'USDC' : 'ARIO';
+      } else if (turboToken === 'polygon-usdc' || turboToken === 'pol') {
+        chain = 'polygon';
+        token = turboToken === 'polygon-usdc' ? 'USDC' : 'POL';
+      } else if (turboToken === 'solana') {
+        chain = 'solana';
+        token = 'SOL';
+      }
+    } else if (walletType === 'ethereum') {
+      chain = 'ethereum';
+      token = 'ETH';
+    } else if (walletType === 'solana') {
+      chain = 'solana';
+      token = 'SOL';
+    }
+
+    return [
+      {
+        address,
+        shareBps: 10_000,
+        chain,
+        token,
+      },
+    ];
+  };
+
   const handlePublish = async () => {
-    if (walletType !== 'arweave' || !address || !libs) {
-      setErrorMessage('Connect Wander (Arweave) to publish permanently.');
-      setStatus('error');
+    // #region agent log
+    fetch('http://127.0.0.1:7939/ingest/0b5e774a-21c9-48b0-b426-076405dcd7ec',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'935ac8'},body:JSON.stringify({sessionId:'935ac8',runId:'pre-fix',hypothesisId:'P1',location:'src/components/PublishModal.tsx:157',message:'handlePublish-start',data:{tier,walletType,hasAddress:Boolean(address),useTurbo,isAutoSample,hasSampleFile:Boolean(sampleFile),hasFullFile:Boolean(fullFile),audioFromGenerator:Boolean(generatedAudio)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log
+    if (!address || !walletType || !libs) {
+      // Show inline wallet chooser instead of a plain error
+      setShowWalletChooser(true);
       return;
     }
     setStatus('uploading');
@@ -74,13 +170,18 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
     try {
       let res: PublishResult;
       if (tier === 'sample') {
+        if (walletType !== 'arweave') {
+          setStatus('error');
+          setErrorMessage('Connect Wander (Arweave) to publish samples permanently.');
+          return;
+        }
         let sample = sampleFile;
-        if (!sample && isAutoSample && track.streamUrl) {
+        if (!sample && isAutoSample && track?.streamUrl) {
           sample = await fetchSampleFromStream(track.streamUrl);
         }
         if (!sample) {
           setStatus('error');
-          setErrorMessage('Upload a short sound bite under 100KB or use auto-sample.');
+          setErrorMessage('Upload a short sound bite under 100KB or use auto-sample (if viewing a track).');
           return;
         }
         if (sample.type && !sample.type.startsWith('audio/')) {
@@ -95,8 +196,8 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
         }
         res = await publishSampleToArweave({
           sample,
-          title: `${track.title} (15s sample)`,
-          artist: track.artist,
+          title: `${customTitle || 'Unknown Track'} (15s sample)`,
+          artist: customArtist || 'Unknown Artist',
           durationSeconds: 15,
         });
       } else {
@@ -118,21 +219,30 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
             setErrorMessage('Connect the matching wallet for the selected Turbo payment option.');
             return;
           }
+        } else if (walletType !== 'arweave') {
+          setStatus('error');
+          setErrorMessage('Connect Wander (Arweave) for non-Turbo full uploads.');
+          return;
         }
         if (!useTurbo && effectiveAudio.size > 10 * 1024 * 1024) {
           setStatus('error');
           setErrorMessage('Full asset must be under ~10MB unless using Turbo.');
           return;
         }
+        const udlConfig = buildUdlConfig();
+        const splits = buildDefaultSplits();
+
         res = await publishFullAsAtomicAsset(
           {
             audio: effectiveAudio,
-            title: track.title,
-            artist: track.artist,
+            title: customTitle || 'Unknown Track',
+            artist: customArtist || 'Unknown Artist',
             description: description.trim() || undefined,
-            artworkUrl: (coverFile || generatedCover) ? undefined : track.artwork,
+            artworkUrl: (coverFile || generatedCover) ? undefined : track?.artwork,
             artworkFile: (coverFile || generatedCover) || undefined,
             royaltiesBps: Number.isFinite(royaltiesBps) ? royaltiesBps : undefined,
+            udl: udlConfig,
+            splits,
             useTurbo,
             turboPaymentToken: turboToken,
           },
@@ -150,16 +260,16 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
       console.info('[publish] Result', res);
       if (res.success && res.txId && address) {
         try {
-          if (walletType === 'arweave' && libs?.getProfileByWalletAddress && libs?.addToZone) {
-            const profile = await libs.getProfileByWalletAddress(address);
+          if (walletType === 'arweave' && libs?.addToZone) {
+            const profile = await getSelectedOrLatestProfileByWallet(libs, address);
             if (profile?.id) {
               await libs.addToZone(
                 {
                   path: 'Samples[]',
                   data: {
                     txId: res.txId,
-                    title: track.title,
-                    artist: track.artist,
+                    title: customTitle || 'Unknown Track',
+                    artist: customArtist || 'Unknown Artist',
                     permawebUrl: res.permawebUrl,
                     arioUrl: res.arioUrl,
                     createdAt: new Date().toISOString(),
@@ -177,8 +287,8 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
           const existing = JSON.parse(localStorage.getItem(key) || '[]') as Array<Record<string, any>>;
           const entry = {
             txId: res.txId,
-            title: track.title,
-            artist: track.artist,
+            title: customTitle || 'Unknown Track',
+            artist: customArtist || 'Unknown Artist',
             permawebUrl: res.permawebUrl,
             arioUrl: res.arioUrl,
             createdAt: new Date().toISOString(),
@@ -191,6 +301,7 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
       }
       if (res.success && onSuccess) onSuccess(res);
     } catch (e: any) {
+      console.error('[publish] Publish failed', e);
       setResult({ success: false, error: e?.message || 'Publish failed' });
       setErrorMessage(e?.message || 'Publish failed');
       setStatus('error');
@@ -209,32 +320,61 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
           <p className={styles.hint}>
             {tier === 'sample'
               ? 'Uploading sample to Arweave…'
-              : 'Uploading audio & minting atomic asset on Arweave…'}
+              : 'Uploading audio completely on-chain…'}
           </p>
         )}
 
         <div className={styles.trackPreview}>
-          {track.artwork ? (
-            <img src={track.artwork} alt="" className={styles.previewArt} />
+          {!track ? (
+            <div className={styles.blankUploadForm}>
+              <label className={styles.label}>
+                Track Title
+                <input
+                  type="text"
+                  className={styles.input}
+                  placeholder="e.g. Neon Horizon"
+                  value={customTitle}
+                  onChange={(e) => setCustomTitle(e.target.value)}
+                />
+              </label>
+              <label className={styles.label}>
+                Artist Name
+                <input
+                  type="text"
+                  className={styles.input}
+                  placeholder="e.g. The Midnight"
+                  value={customArtist}
+                  onChange={(e) => setCustomArtist(e.target.value)}
+                />
+              </label>
+            </div>
           ) : (
-            <div className={styles.previewArtPlaceholder} aria-hidden="true" />
+            <>
+              {track.artwork ? (
+                <img src={track.artwork} alt="" className={styles.previewArt} />
+              ) : (
+                <div className={styles.previewArtPlaceholder} aria-hidden="true" />
+              )}
+              <div>
+                <strong>{track.title}</strong>
+                <span className={styles.previewArtist}>{track.artist}</span>
+              </div>
+            </>
           )}
-          <div>
-            <strong>{track.title}</strong>
-            <span className={styles.previewArtist}>{track.artist}</span>
-          </div>
         </div>
 
         <div className={styles.tiers}>
-          <label className={styles.tierCard + (tier === 'sample' ? ' ' + styles.tierActive : '')}>
-            <input type="radio" name="tier" checked={tier === 'sample'} onChange={() => setTier('sample')} />
-            <span className={styles.tierTitle}>Sample — Free</span>
-            <span className={styles.tierDesc}>15s preview · Under 100KB · Permanent link · Collectible in-app</span>
-          </label>
+          {track && (
+            <label className={styles.tierCard + (tier === 'sample' ? ' ' + styles.tierActive : '')}>
+              <input type="radio" name="tier" checked={tier === 'sample'} onChange={() => setTier('sample')} />
+              <span className={styles.tierTitle}>Sample — Free</span>
+              <span className={styles.tierDesc}>15s preview · Under 100KB · Permanent link · Collectible in-app</span>
+            </label>
+          )}
           <label className={styles.tierCard + (tier === 'full' ? ' ' + styles.tierActive : '')}>
             <input type="radio" name="tier" checked={tier === 'full'} onChange={() => setTier('full')} />
-            <span className={styles.tierTitle}>Full — Atomic Asset</span>
-            <span className={styles.tierDesc}>Up to ~10MB · Metadata, artwork, royalties · Composable asset</span>
+            <span className={styles.tierTitle}>Full — Permanent Audio</span>
+            <span className={styles.tierDesc}>Up to ~10MB · Metadata, artwork, royalties · Full quality audio</span>
           </label>
         </div>
 
@@ -250,14 +390,16 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
                   onChange={(e) => setSampleFile(e.target.files?.[0] || null)}
                 />
               </label>
-              <label className={styles.checkLabel}>
-                <input
-                  type="checkbox"
-                  checked={isAutoSample}
-                  onChange={(e) => setIsAutoSample(e.target.checked)}
-                />
-                <span>Auto-sample from the track stream when available.</span>
-              </label>
+              {track?.streamUrl && (
+                <label className={styles.checkLabel}>
+                  <input
+                    type="checkbox"
+                    checked={isAutoSample}
+                    onChange={(e) => setIsAutoSample(e.target.checked)}
+                  />
+                  <span>Auto-sample from the track stream when available.</span>
+                </label>
+              )}
               <p className={styles.hint}>
                 Tip: export a short MP3 clip to hit the free tier target.
               </p>
@@ -325,6 +467,62 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
                   onChange={(e) => setRoyaltiesBps(Number(e.target.value))}
                 />
               </label>
+              <div className={styles.licenseBlock}>
+                <p className={styles.licenseTitle}>License & usage (UDL)</p>
+                <label className={styles.label}>
+                  Usage
+                  <select
+                    className={styles.select}
+                    value={licenseUsePreset}
+                    onChange={(e) => setLicenseUsePreset(e.target.value as typeof licenseUsePreset)}
+                  >
+                    <option value="stream">Streaming only</option>
+                    <option value="stream-download">Stream + personal download</option>
+                    <option value="stream-download-commercial">Stream + download + commercial sync</option>
+                  </select>
+                </label>
+                <label className={styles.label}>
+                  AI use
+                  <select
+                    className={styles.select}
+                    value={aiUse}
+                    onChange={(e) => setAiUse(e.target.value as UdlAiUse)}
+                  >
+                    <option value="deny">No AI training or generation</option>
+                    <option value="allow-train">Allow AI training only</option>
+                    <option value="allow-generate">Allow training + generation</option>
+                  </select>
+                </label>
+                <div className={styles.licenseRow}>
+                  <label className={styles.label} style={{ flex: 1 }}>
+                    License fee
+                    <input
+                      className={styles.input}
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={licenseFee}
+                      onChange={(e) => setLicenseFee(e.target.value)}
+                    />
+                  </label>
+                  <label className={styles.label} style={{ flex: 1 }}>
+                    Currency
+                    <select
+                      className={styles.select}
+                      value={licenseCurrency}
+                      onChange={(e) => setLicenseCurrency(e.target.value)}
+                    >
+                      <option value="U">$U (AO)</option>
+                      <option value="MATIC">MATIC (Polygon)</option>
+                      <option value="USDC.base">USDC (Base)</option>
+                      <option value="AR">AR (Arweave)</option>
+                    </select>
+                  </label>
+                </div>
+                <p className={styles.hint}>
+                  These values are stored on-chain in the Universal Data License (UDL) fields for this track.
+                </p>
+              </div>
               <label className={styles.checkLabel}>
                 <input
                   type="checkbox"
@@ -345,14 +543,44 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
                     <option value="ethereum">Ethereum (ETH wallet)</option>
                     <option value="base-eth">Base (ETH wallet)</option>
                     <option value="solana">Solana (Phantom)</option>
+                    <option value="base-usdc">Base (USDC)</option>
+                    <option value="base-ario">Base (ARIO)</option>
+                    <option value="polygon-usdc">Polygon (USDC)</option>
+                    <option value="pol">Polygon (POL)</option>
                   </select>
                 </label>
+              )}
+              {useTurbo && (
+                <div style={{ marginTop: '8px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                  <p className={styles.hint} style={{ margin: '0 0 8px 0' }}>Need Turbo credits? Top up with a credit card.</p>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '1rem', fontWeight: 500 }}>$</span>
+                    <input
+                      type="number"
+                      min="5"
+                      step="1"
+                      className={styles.input}
+                      style={{ width: '80px', margin: 0 }}
+                      value={fiatAmount}
+                      onChange={(e) => setFiatAmount(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className={styles.copyBtn}
+                      onClick={handleFiatTopUp}
+                      disabled={isTopUpLoading}
+                      style={{ margin: 0, padding: '8px 16px', background: 'var(--accent-color)' }}
+                    >
+                      {isTopUpLoading ? 'Loading…' : 'Buy Credits'}
+                    </button>
+                  </div>
+                </div>
               )}
               <p className={styles.hint}>
                 Turbo uses the selected wallet for payment and credits.
               </p>
               <p className={styles.hint}>
-                Royalties are stored in atomic asset metadata for future distribution/DEX integration.
+                Royalties are stored in standard metadata for future distribution/DEX integration.
               </p>
             </>
           )}
@@ -377,7 +605,11 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
             )}
             {result.txId && <p className={styles.assetId}>Tx ID: {result.txId.slice(0, 12)}…</p>}
             {result.txId && (
-              <button type="button" className={styles.copyBtn} onClick={() => handleCopyTxId(result.txId)}>
+              <button
+                type="button"
+                className={styles.copyBtn}
+                onClick={() => result.txId && handleCopyTxId(result.txId)}
+              >
                 {copiedTxId ? 'Copied' : 'Copy tx id'}
               </button>
             )}
@@ -405,16 +637,78 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
             type="button"
             className={styles.publishBtn}
             onClick={handlePublish}
-            disabled={status === 'uploading' || status === 'confirming'}
+            disabled={status === 'uploading' || status === 'confirming' || isConnecting}
           >
             {status === 'uploading' || status === 'confirming'
               ? 'Publishing…'
               : status === 'done'
                 ? 'Done'
-                : `Publish ${tier === 'sample' ? 'sample' : 'full asset'}`}
+                : !address
+                  ? 'Connect wallet to publish'
+                  : `Publish ${tier === 'sample' ? 'sample' : 'full asset'}`}
           </button>
         </div>
+
       </div>
+
+      {/* Inline wallet chooser — full-screen overlay rendered as sibling of modal */}
+      {showWalletChooser && (
+        <div
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(10,10,20,0.92)', backdropFilter: 'blur(16px)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', gap: '14px', padding: '32px',
+            zIndex: 210,
+          }}
+          onClick={() => setShowWalletChooser(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', maxWidth: '320px', width: '100%' }}
+          >
+            <p style={{ fontWeight: 700, fontSize: '1.2rem', color: '#fff', marginBottom: '4px', textAlign: 'center' }}>Connect a wallet to publish</p>
+            <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.5)', textAlign: 'center', lineHeight: 1.5, marginBottom: '8px' }}>
+              Choose the wallet that matches your preferred payment method.
+            </p>
+            <button
+              type="button"
+              className={styles.publishBtn}
+              style={{ width: '100%' }}
+              disabled={isConnecting}
+              onClick={() => connect('arweave').then(() => setShowWalletChooser(false))}
+            >
+              🔑 Arweave (Wander)
+            </button>
+            <button
+              type="button"
+              className={styles.publishBtn}
+              style={{ width: '100%', background: 'rgba(98,126,234,0.85)' }}
+              disabled={isConnecting}
+              onClick={() => connect('ethereum').then(() => setShowWalletChooser(false))}
+            >
+              🦊 Ethereum / MetaMask
+            </button>
+            <button
+              type="button"
+              className={styles.publishBtn}
+              style={{ width: '100%', background: 'rgba(20,180,130,0.85)' }}
+              disabled={isConnecting}
+              onClick={() => connect('solana').then(() => setShowWalletChooser(false))}
+            >
+              👻 Solana (Phantom)
+            </button>
+            <button
+              type="button"
+              className={styles.cancelBtn}
+              style={{ marginTop: '4px' }}
+              onClick={() => setShowWalletChooser(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
