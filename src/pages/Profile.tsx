@@ -1,10 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useWallet } from '../context/WalletContext';
 import { usePermaweb } from '../context/PermawebContext';
 import { useAudiusAuth } from '../context/AudiusAuthContext';
+import { type Track, usePlayer } from '../context/PlayerContext';
 import { LogoSpinner } from '../components/LogoSpinner';
-import { searchUsers, type AudiusUser } from '../lib/audius';
+import {
+  getArtworkUrl,
+  getStreamUrl,
+  getUserAlbums,
+  getUserByHandle,
+  getUserPlaylists,
+  getUserTracks,
+  type AudiusAlbum,
+  type AudiusPlaylist,
+  type AudiusTrack,
+  type AudiusUser,
+} from '../lib/audius';
 import { CreateProfileModal } from '../components/CreateProfileModal';
 import { type RegisteredTrackRecord, searchTracksOnAO } from '../lib/aoMusicRegistry';
 import { getRoyaltyPayoutPlan } from '../lib/aoRoyaltyEngine';
@@ -17,11 +29,14 @@ import {
   getProfileHandle,
   getLatestProfileByWallet,
   getProfileOptionsByWallet,
+  getProfileByIdSafe,
   getSelectedOrLatestProfileByWallet,
   getStoredProfileOverrideId,
   setStoredProfileOverrideId,
 } from '../lib/permaProfile';
 import { resolveProfileTokens, type ResolvedProfileToken } from '../lib/profileTokens';
+import { PublishModal } from '../components/PublishModal';
+import { useApi } from '@arweave-wallet-kit/react';
 import styles from './Profile.module.css';
 
 type PermaProfile = {
@@ -49,6 +64,27 @@ type ProfileOption = {
   id: string;
   timestamp?: number;
 };
+
+const PROFILE_CACHE = new Map<string, any>();
+const PROFILE_OPTIONS_CACHE = new Map<string, ProfileOption[]>();
+const PROFILE_TOKENS_CACHE = new Map<string, ResolvedProfileToken[]>();
+
+function getProfileSnapshotKey(walletAddress: string) {
+  return `streamvault:profileSnapshot:${walletAddress.toLowerCase()}`;
+}
+
+function inferProfileWalletAddress(profile: any, fallback?: string | null): string | null {
+  const owner =
+    profile?.walletAddress ||
+    profile?.WalletAddress ||
+    profile?.owner ||
+    profile?.Owner ||
+    null;
+  if (typeof owner === 'string' && owner.trim()) return owner;
+  if (fallback && typeof fallback === 'string' && fallback.trim()) return fallback;
+  return null;
+}
+
 function fileToDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -59,12 +95,16 @@ function fileToDataURL(file: File): Promise<string> {
 }
 
 export function Profile() {
-  const { address } = useParams<{ address: string }>();
+  const profileDebug = import.meta.env.DEV && String(import.meta.env.VITE_DEBUG_PROFILE || '') === '1';
+  const profileLog = (...args: any[]) => {
+    if (profileDebug) console.info(...args);
+  };
+  const { address: routeProfileRef } = useParams<{ address: string }>();
   const { address: connectedAddress, walletType } = useWallet();
-  const { audiusUser } = useAudiusAuth();
-  const isOwn = connectedAddress && address && connectedAddress.toLowerCase() === address.toLowerCase();
-  const resolvedAddress = isOwn ? connectedAddress : address;
-  const { libs, isReady } = usePermaweb();
+  const { audiusUser, login, logout, apiKeyConfigured, isLoggingIn, authError: audiusAuthError } = useAudiusAuth();
+  const { play, pause, currentTrack, isPlaying } = usePlayer();
+  const arweaveApi = useApi();
+  const { libs, isReady, getWritableLibs } = usePermaweb();
 
   const [profile, setProfile] = useState<PermaProfile | null>(null);
   const [loading, setLoading] = useState(false);
@@ -74,7 +114,19 @@ export function Profile() {
   const [error, setError] = useState<string | null>(null);
   const [localSamples, setLocalSamples] = useState<LocalSample[]>([]);
   const [copiedTxId, setCopiedTxId] = useState<string | null>(null);
+  const [copiedShareUrl, setCopiedShareUrl] = useState(false);
+  const [copiedProfileId, setCopiedProfileId] = useState(false);
   const [audiusProfile, setAudiusProfile] = useState<AudiusUser | null>(null);
+  const [audiusTracks, setAudiusTracks] = useState<AudiusTrack[]>([]);
+  const [audiusAlbums, setAudiusAlbums] = useState<AudiusAlbum[]>([]);
+  const [audiusPlaylists, setAudiusPlaylists] = useState<AudiusPlaylist[]>([]);
+  const [audiusCatalogLoading, setAudiusCatalogLoading] = useState(false);
+  const [audiusCatalogError, setAudiusCatalogError] = useState<string | null>(null);
+  const [audiusCatalogExpanded, setAudiusCatalogExpanded] = useState(false);
+  const [linkingAudius, setLinkingAudius] = useState(false);
+  const [linkAudiusError, setLinkAudiusError] = useState<string | null>(null);
+  const [linkAudiusSuccess, setLinkAudiusSuccess] = useState<string | null>(null);
+  const [linkAudiusDebug, setLinkAudiusDebug] = useState<Record<string, any> | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [profileOverrideId, setProfileOverrideId] = useState<string>('');
   const [profileOverrideInput, setProfileOverrideInput] = useState<string>('');
@@ -87,7 +139,9 @@ export function Profile() {
   const [aoBalances, setAoBalances] = useState<{ key: string; amount: number }[] | null>(null);
   const [aoDebugLoading, setAoDebugLoading] = useState(false);
   const [aoDebugError, setAoDebugError] = useState<string | null>(null);
+  const [publishTrack, setPublishTrack] = useState<Track | null>(null);
   const [profileTokens, setProfileTokens] = useState<ResolvedProfileToken[]>([]);
+  const tokenResolveTimerRef = useRef<number | null>(null);
   const aoTokens = useMemo(
     () => profileTokens.filter((item) => item.kind === 'ao-token'),
     [profileTokens]
@@ -106,6 +160,29 @@ export function Profile() {
     } as any;
     return merged;
   }, [profile, libs]);
+
+  const profileWalletAddress = useMemo(() => {
+    const raw =
+      normalizedProfile?.walletAddress ||
+      normalizedProfile?.WalletAddress ||
+      normalizedProfile?.owner ||
+      normalizedProfile?.Owner ||
+      null;
+    return raw ? String(raw) : null;
+  }, [normalizedProfile]);
+
+  const isOwn = useMemo(() => {
+    if (!connectedAddress) return false;
+    if (routeProfileRef && connectedAddress.toLowerCase() === routeProfileRef.toLowerCase()) return true;
+    if (profileWalletAddress && connectedAddress.toLowerCase() === profileWalletAddress.toLowerCase()) return true;
+    return false;
+  }, [connectedAddress, profileWalletAddress, routeProfileRef]);
+
+  const resolvedAddress = useMemo(() => {
+    if (profileWalletAddress) return profileWalletAddress;
+    if (isOwn && connectedAddress) return connectedAddress;
+    return routeProfileRef || null;
+  }, [connectedAddress, isOwn, profileWalletAddress, routeProfileRef]);
 
   const avatarSource = useMemo(() => {
     return getProfileAvatar(normalizedProfile);
@@ -163,30 +240,85 @@ export function Profile() {
 
   const shareUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
-    return `${window.location.origin}/#/profile/${address}`;
-  }, [address]);
+    const ref = normalizedProfile?.id || routeProfileRef || '';
+    return `${window.location.origin}/#/profile/${ref}`;
+  }, [normalizedProfile?.id, routeProfileRef]);
+
+  const toAudiusUrl = (permalink: string) =>
+    permalink.startsWith('http://') || permalink.startsWith('https://')
+      ? permalink
+      : `https://audius.co${permalink.startsWith('/') ? '' : '/'}${permalink}`;
+
+  const toPlayableTrack = (track: AudiusTrack): Track => ({
+    id: track.id,
+    title: track.title,
+    artist: track.user?.name || track.user?.handle || audiusProfile?.name || audiusUser?.name || 'Unknown artist',
+    artistId: track.user?.id || String(track.user_id || ''),
+    artwork: getArtworkUrl(track) || undefined,
+    streamUrl: getStreamUrl(track),
+    duration: track.duration,
+  });
+
+  const openAudiusLogin = () => {
+    if (typeof window === 'undefined') return;
+    window.open('https://audius.co/login', '_blank', 'noopener,noreferrer');
+  };
+
+  const effectiveAudiusHandle = useMemo(() => {
+    const fromProfile = normalizedProfile?.audiusHandle || profile?.audiusHandle;
+    if (fromProfile) return String(fromProfile);
+    if (isOwn && audiusUser?.handle) return audiusUser.handle;
+    return '';
+  }, [normalizedProfile?.audiusHandle, profile?.audiusHandle, isOwn, audiusUser?.handle]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!isReady || !libs || !resolvedAddress) return;
-      if (isOwn && !walletType) return;
-      setLoading(true);
+      if (!isReady || !libs || !routeProfileRef) return;
+      const cached = PROFILE_CACHE.get(routeProfileRef);
+      if (cached) {
+        setProfile(cached);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
       setError(null);
       try {
-        console.info('[profile] fetch start', { address: resolvedAddress });
+        profileLog('[profile] fetch start', { ref: routeProfileRef });
         const overrideId =
-          getStoredProfileOverrideId(resolvedAddress);
+          resolvedAddress ? getStoredProfileOverrideId(resolvedAddress) : '';
         if (overrideId) {
           setProfileOverrideId(overrideId);
           setProfileOverrideInput(overrideId);
         }
-        const p = overrideId && libs.getProfileById
-          ? await libs.getProfileById(overrideId)
-          : await getSelectedOrLatestProfileByWallet(libs, resolvedAddress);
-        console.info('[profile] data', p);
-        console.info('[profile] fetch result', { hasProfile: Boolean(p?.id) });
-        if (!cancelled) setProfile(p || { id: null });
+        let p = overrideId ? await getProfileByIdSafe(libs, overrideId) : null;
+        if (!p?.id) {
+          const byId = await getProfileByIdSafe(libs, routeProfileRef);
+          if (byId?.id) p = byId;
+        }
+        if (!p?.id) {
+          p = await getSelectedOrLatestProfileByWallet(libs, routeProfileRef);
+        }
+        profileLog('[profile] data', p);
+        profileLog('[profile] fetch result', { hasProfile: Boolean(p?.id) });
+        if (!cancelled) {
+          const next = p || { id: null };
+          setProfile(next);
+          if (next?.id) PROFILE_CACHE.set(routeProfileRef, next);
+          const walletForSnapshot = inferProfileWalletAddress(next, resolvedAddress);
+          if (walletForSnapshot && typeof window !== 'undefined') {
+            try {
+              localStorage.setItem(getProfileSnapshotKey(walletForSnapshot), JSON.stringify(next));
+            } catch {
+              // ignore storage failures
+            }
+            window.dispatchEvent(
+              new CustomEvent('streamvault:profile-updated', {
+                detail: { address: walletForSnapshot, profile: next },
+              })
+            );
+          }
+        }
       } catch (e: any) {
         console.error('[profile] fetch failed', e);
         if (!cancelled) setError(e?.message || 'Failed to load profile');
@@ -197,17 +329,25 @@ export function Profile() {
     return () => {
       cancelled = true;
     };
-  }, [isReady, walletType, libs, resolvedAddress, isOwn]);
+  }, [isReady, libs, routeProfileRef, connectedAddress]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!libs || !resolvedAddress) return;
-      if (isOwn && !walletType) return;
+      const walletForOptions = profileWalletAddress || (isOwn ? connectedAddress : null);
+      if (!libs || !walletForOptions) return;
+      const cached = PROFILE_OPTIONS_CACHE.get(walletForOptions);
+      if (cached) {
+        setProfileOptions(cached);
+        return;
+      }
       try {
-        console.info('[profile] options fetch start', { address: resolvedAddress });
-        const options = await getProfileOptionsByWallet(libs, resolvedAddress);
-        if (!cancelled) setProfileOptions(options);
+        profileLog('[profile] options fetch start', { address: walletForOptions });
+        const options = await getProfileOptionsByWallet(libs, walletForOptions);
+        if (!cancelled) {
+          setProfileOptions(options);
+          PROFILE_OPTIONS_CACHE.set(walletForOptions, options);
+        }
       } catch (e) {
         console.error('[profile] options fetch failed', e);
       }
@@ -215,17 +355,17 @@ export function Profile() {
     return () => {
       cancelled = true;
     };
-  }, [libs, resolvedAddress, isOwn, walletType]);
+  }, [libs, profileWalletAddress, isOwn, connectedAddress]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!libs?.getProfileById) return;
+      if (!libs) return;
       if (normalizedProfile?.id) return;
       if (!profileOptions.length) return;
       try {
         // If identity hints exist but ID is missing, resolve first indexed profile as source of truth.
-        const recovered = await libs.getProfileById(profileOptions[0].id);
+        const recovered = await getProfileByIdSafe(libs, profileOptions[0].id);
         if (!cancelled && recovered?.id) setProfile(recovered);
       } catch {
         // ignore
@@ -238,53 +378,123 @@ export function Profile() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      if (!libs || !Array.isArray(normalizedProfile?.assets) || normalizedProfile.assets.length === 0) {
-        setProfileTokens([]);
-        return;
-      }
-      try {
-        const resolved = await resolveProfileTokens(libs, normalizedProfile.assets);
-        if (!cancelled) setProfileTokens(resolved);
-      } catch {
-        if (!cancelled) setProfileTokens([]);
-      }
-    })();
+    if (tokenResolveTimerRef.current != null) {
+      window.clearTimeout(tokenResolveTimerRef.current);
+      tokenResolveTimerRef.current = null;
+    }
+    tokenResolveTimerRef.current = window.setTimeout(() => {
+      (async () => {
+        const assets = normalizedProfile?.assets;
+        const profileId = normalizedProfile?.id ? String(normalizedProfile.id) : '';
+        if (!libs || !Array.isArray(assets) || assets.length === 0) {
+          setProfileTokens([]);
+          return;
+        }
+        const tokenCacheKey = `${profileId}:${JSON.stringify(assets)}`;
+        const cached = PROFILE_TOKENS_CACHE.get(tokenCacheKey);
+        if (cached) {
+          if (!cancelled) setProfileTokens(cached);
+          return;
+        }
+        try {
+          const resolved = await resolveProfileTokens(libs, assets);
+          if (!cancelled) {
+            setProfileTokens(resolved);
+            PROFILE_TOKENS_CACHE.set(tokenCacheKey, resolved);
+          }
+        } catch {
+          if (!cancelled) setProfileTokens([]);
+        }
+      })();
+    }, 150);
     return () => {
       cancelled = true;
+      if (tokenResolveTimerRef.current != null) {
+        window.clearTimeout(tokenResolveTimerRef.current);
+        tokenResolveTimerRef.current = null;
+      }
     };
   }, [libs, normalizedProfile?.assets]);
 
   useEffect(() => {
     let cancelled = false;
-    const handle = profile?.audiusHandle;
+    const handle = effectiveAudiusHandle;
     if (!handle) {
       setAudiusProfile(null);
+      setAudiusTracks([]);
+      setAudiusAlbums([]);
+      setAudiusPlaylists([]);
+      setAudiusCatalogError(null);
+      setAudiusCatalogLoading(false);
       return;
     }
     (async () => {
       try {
-        const results = await searchUsers(handle, 1);
-        if (!cancelled) setAudiusProfile(results[0] || null);
-      } catch {
-        if (!cancelled) setAudiusProfile(null);
+        setAudiusCatalogLoading(true);
+        setAudiusCatalogError(null);
+        const user = await getUserByHandle(handle);
+        if (!user) {
+          if (!cancelled) {
+            setAudiusProfile(null);
+            setAudiusTracks([]);
+            setAudiusAlbums([]);
+            setAudiusPlaylists([]);
+          }
+          return;
+        }
+        const userId = String(user.user_id || user.id);
+        const [tracks, albums, playlists] = await Promise.all([
+          getUserTracks(userId, 12),
+          getUserAlbums(userId, 8),
+          getUserPlaylists(userId, 8),
+        ]);
+        if (!cancelled) {
+          setAudiusProfile(user);
+          setAudiusTracks(tracks);
+          setAudiusAlbums(albums);
+          setAudiusPlaylists(playlists);
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setAudiusProfile(null);
+          setAudiusTracks([]);
+          setAudiusAlbums([]);
+          setAudiusPlaylists([]);
+          setAudiusCatalogError(e?.message || 'Failed to load Audius catalog.');
+        }
+      } finally {
+        if (!cancelled) setAudiusCatalogLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [profile?.audiusHandle]);
+  }, [effectiveAudiusHandle]);
+
+  const visibleAudiusAlbums = useMemo(
+    () => (audiusCatalogExpanded ? audiusAlbums : audiusAlbums.slice(0, 4)),
+    [audiusCatalogExpanded, audiusAlbums]
+  );
+  const visibleAudiusPlaylists = useMemo(
+    () => (audiusCatalogExpanded ? audiusPlaylists : audiusPlaylists.slice(0, 4)),
+    [audiusCatalogExpanded, audiusPlaylists]
+  );
+  const visibleAudiusTracks = useMemo(
+    () => (audiusCatalogExpanded ? audiusTracks : audiusTracks.slice(0, 6)),
+    [audiusCatalogExpanded, audiusTracks]
+  );
+  const hasMoreAudiusCatalog = audiusAlbums.length > 4 || audiusPlaylists.length > 4 || audiusTracks.length > 6;
 
   useEffect(() => {
-    if (!address || typeof window === 'undefined') return;
+    if (!resolvedAddress || typeof window === 'undefined') return;
     try {
-      const key = `streamvault:samples:${address.toLowerCase()}`;
+      const key = `streamvault:samples:${resolvedAddress.toLowerCase()}`;
       const stored = JSON.parse(localStorage.getItem(key) || '[]') as LocalSample[];
       setLocalSamples(stored);
     } catch {
       setLocalSamples([]);
     }
-  }, [address]);
+  }, [resolvedAddress]);
 
   const onChainSamples = useMemo(() => {
     const raw = normalizedProfile?.samples || normalizedProfile?.Samples || [];
@@ -345,16 +555,16 @@ export function Profile() {
 
   const handleVerifyAudius = async () => {
     if (!normalizedProfile?.audiusHandle || !normalizedProfile?.id || !libs?.updateZone) return;
-    if (!address || !walletType) return;
+    if (!connectedAddress || !walletType) return;
     setVerifying(true);
     setVerifyError(null);
     try {
-      const message = `StreamVault Audius verification\nHandle: ${normalizedProfile.audiusHandle}\nWallet: ${address}\nTimestamp: ${new Date().toISOString()}`;
+      const message = `StreamVault Audius verification\nHandle: ${normalizedProfile.audiusHandle}\nWallet: ${connectedAddress}\nTimestamp: ${new Date().toISOString()}`;
       let signature: string | null = null;
       if (walletType === 'ethereum' && (window as any).ethereum) {
         signature = await (window as any).ethereum.request({
           method: 'personal_sign',
-          params: [message, address],
+          params: [message, connectedAddress],
         });
       } else if (walletType === 'solana' && (window as any).solana?.signMessage) {
         const encoded = new TextEncoder().encode(message);
@@ -370,7 +580,7 @@ export function Profile() {
       const proof = {
         handle: normalizedProfile.audiusHandle,
         walletType,
-        address,
+        address: connectedAddress,
         message,
         signature,
         createdAt: new Date().toISOString(),
@@ -390,12 +600,12 @@ export function Profile() {
   };
 
   const handleProfileOverride = async (nextId?: string) => {
-    if (!resolvedAddress || !libs?.getProfileById) return;
+    if (!resolvedAddress || !libs) return;
     const id = (nextId || profileOverrideInput).trim();
     if (!id) return;
     try {
       setLoading(true);
-      const p = await libs.getProfileById(id);
+      const p = await getProfileByIdSafe(libs, id);
       setProfile(p || { id: null });
       setProfileOverrideId(id);
       setStoredProfileOverrideId(resolvedAddress, id);
@@ -432,6 +642,112 @@ export function Profile() {
     }
   };
 
+  const handleCopyShareUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopiedShareUrl(true);
+      window.setTimeout(() => setCopiedShareUrl(false), 1400);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleCopyProfileId = async () => {
+    if (!normalizedProfile?.id) return;
+    try {
+      await navigator.clipboard.writeText(String(normalizedProfile.id));
+      setCopiedProfileId(true);
+      window.setTimeout(() => setCopiedProfileId(false), 1400);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleLinkAudiusToProfile = async () => {
+    if (!isOwn || !connectedAddress || walletType !== 'arweave' || !audiusUser || !libs) return;
+    setLinkingAudius(true);
+    setLinkAudiusError(null);
+    setLinkAudiusSuccess(null);
+    setLinkAudiusDebug(null);
+    try {
+      const injectedWallet = typeof window !== 'undefined' ? (window as any).arweaveWallet : null;
+      const signerWallet = injectedWallet || arweaveApi || null;
+      if (!signerWallet) throw new Error('Arweave signer unavailable.');
+
+      const permissionsBefore = await signerWallet.getPermissions?.().catch(() => null);
+      if (signerWallet?.connect) {
+        await signerWallet.connect([
+          'ACCESS_ADDRESS',
+          'ACCESS_PUBLIC_KEY',
+          'SIGN_TRANSACTION',
+          'SIGNATURE',
+          'DISPATCH',
+        ]);
+      }
+      const permissionsAfter = await signerWallet.getPermissions?.().catch(() => null);
+
+      const signerAddress = await signerWallet.getActiveAddress?.().catch(() => null);
+      const writableLibs = await getWritableLibs();
+      if (!writableLibs?.updateZone) {
+        throw new Error('Writable permaweb client unavailable. Reconnect Wander and retry.');
+      }
+      const profileRecord =
+        normalizedProfile?.id
+          ? { id: normalizedProfile.id }
+          : await getSelectedOrLatestProfileByWallet(libs, connectedAddress);
+      if (!profileRecord?.id) {
+        throw new Error('Create an Arweave profile first, then link your Audius identity.');
+      }
+      const resolvedHandle =
+        String(profileHandle || normalizedProfile?.username || '').trim() ||
+        String(connectedAddress || '').slice(0, 12);
+      const resolvedName =
+        String(
+          (profileName !== 'Unnamed' ? profileName : '') ||
+          normalizedProfile?.displayName ||
+          normalizedProfile?.name ||
+          resolvedHandle
+        ).trim();
+      const resolvedBio = String(profileBio || normalizedProfile?.description || '').trim();
+      const zonePayload = {
+        Name: resolvedName,
+        Handle: resolvedHandle,
+        Bio: resolvedBio,
+        AudiusHandle: String(audiusUser.handle || '').trim(),
+      };
+      await writableLibs.updateZone(zonePayload, profileRecord.id);
+
+      setProfile((prev) => (prev ? { ...prev, audiusHandle: audiusUser.handle } : prev));
+      window.dispatchEvent(new CustomEvent('streamvault:profile-updated'));
+      setLinkAudiusDebug({
+        status: 'success',
+        usedPath: 'fresh-writable-updateZone',
+        signerSource: injectedWallet ? 'injected' : 'wallet-kit-api',
+        signerAddress,
+        permissionsBefore,
+        permissionsAfter,
+        connectedAddress,
+        profileId: profileRecord.id,
+        payload: zonePayload,
+      });
+      setLinkAudiusSuccess('Audius identity linked to profile.');
+    } catch (e: any) {
+      const msg = String(e?.message || 'Failed to link Audius profile.');
+      setLinkAudiusDebug({
+        status: 'error',
+        message: msg,
+        signerSource:
+          (typeof window !== 'undefined' && (window as any).arweaveWallet)
+            ? 'injected'
+            : 'wallet-kit-api',
+        stack: e?.stack ? String(e.stack).slice(0, 1200) : '',
+      });
+      setLinkAudiusError(`Failed to link Audius profile. ${msg.replace(/^Error:\s*/g, '')}`);
+    } finally {
+      setLinkingAudius(false);
+    }
+  };
+
   const handleCreateProfile = async (form: {
     username: string;
     displayName: string;
@@ -444,14 +760,14 @@ export function Profile() {
     removeThumbnail?: boolean;
     removeBanner?: boolean;
   }) => {
-    if (!libs?.createProfile || !address) return;
+    if (!libs?.createProfile || !connectedAddress) return;
     setCreating(true);
     setError(null);
     try {
-      console.info('[profile] create start', { address, audiusHandle: form.audiusHandle });
-      const existing = await getSelectedOrLatestProfileByWallet(libs, address);
+      profileLog('[profile] create start', { address: connectedAddress, audiusHandle: form.audiusHandle });
+      const existing = await getSelectedOrLatestProfileByWallet(libs, connectedAddress);
       if (existing?.id) {
-        console.info('[profile] existing profile found', { profileId: existing.id });
+        profileLog('[profile] existing profile found', { profileId: existing.id });
         setProfile(existing);
         setCreateOpen(false);
         return;
@@ -465,7 +781,7 @@ export function Profile() {
       if (form.banner) args.banner = await fileToDataURL(form.banner);
 
       const profileId = await libs.createProfile(args);
-      console.info('[profile] create success', { profileId });
+      profileLog('[profile] create success', { profileId });
       if (profileId && libs.updateZone) {
         const update: Record<string, string> = {
           Name: form.displayName.trim(),
@@ -474,9 +790,28 @@ export function Profile() {
         };
         if (form.audiusHandle) update.AudiusHandle = form.audiusHandle;
         await libs.updateZone(update, profileId);
-        console.info('[profile] profile updated', { profileId });
+        profileLog('[profile] profile updated', { profileId });
       }
-      setProfile({ id: profileId, walletAddress: address, username: args.username, displayName: args.displayName, description: args.description });
+      setProfile({ id: profileId, walletAddress: connectedAddress, username: args.username, displayName: args.displayName, description: args.description });
+      if (typeof window !== 'undefined') {
+        const next = {
+          id: profileId,
+          walletAddress: connectedAddress,
+          username: args.username,
+          displayName: args.displayName,
+          description: args.description,
+        };
+        try {
+          localStorage.setItem(getProfileSnapshotKey(connectedAddress), JSON.stringify(next));
+        } catch {
+          // ignore storage failures
+        }
+        window.dispatchEvent(
+          new CustomEvent('streamvault:profile-updated', {
+            detail: { address: connectedAddress, profile: next },
+          })
+        );
+      }
       setCreateOpen(false);
 
       if (profileId && localSamples.length > 0 && libs.addToZone) {
@@ -491,7 +826,7 @@ export function Profile() {
               profileId
             );
           }
-          console.info('[profile] local samples synced', { count: localSamples.length });
+          profileLog('[profile] local samples synced', { count: localSamples.length });
         } catch (e) {
           console.warn('[profile] Failed to sync samples', e);
         } finally {
@@ -501,7 +836,7 @@ export function Profile() {
 
       // Best-effort refresh (indexing may lag)
       try {
-        const fresh = await getSelectedOrLatestProfileByWallet(libs, address);
+        const fresh = await getSelectedOrLatestProfileByWallet(libs, connectedAddress);
         if (fresh) setProfile(fresh);
       } catch {
         // ignore - eventual consistency
@@ -567,6 +902,18 @@ export function Profile() {
         (await libs.getProfileById?.(normalizedProfile.id)) ||
         (resolvedAddress ? await getSelectedOrLatestProfileByWallet(libs, resolvedAddress) : null);
       if (fresh) setProfile(fresh);
+      if (fresh && connectedAddress && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(getProfileSnapshotKey(connectedAddress), JSON.stringify(fresh));
+        } catch {
+          // ignore storage failures
+        }
+        window.dispatchEvent(
+          new CustomEvent('streamvault:profile-updated', {
+            detail: { address: connectedAddress, profile: fresh },
+          })
+        );
+      }
       setEditOpen(false);
     } catch (e: any) {
       setError(e?.message || 'Profile update failed');
@@ -594,30 +941,201 @@ export function Profile() {
           </h1>
           {profileHandle && <p className={styles.subtext}>@{profileHandle}</p>}
           {profileBio && <p className={styles.subtext}>{profileBio}</p>}
-          <p className={styles.address}>{address?.slice(0, 8)}…{address?.slice(-8)}</p>
+          <p className={styles.address}>{resolvedAddress?.slice(0, 8)}…{resolvedAddress?.slice(-8)}</p>
           {walletType && <span className={styles.walletType}>{walletType}</span>}
         </div>
       </header>
-      {audiusProfile && (
+      {(audiusProfile || (isOwn && audiusUser)) && (
         <section className={styles.section}>
           <div className={styles.profileCard}>
             <div>
-              <p className={styles.profileName}>{audiusProfile.name}</p>
-              <p className={styles.subtext}>Audius · @{audiusProfile.handle}</p>
+              <p className={styles.profileName}>{audiusProfile?.name || audiusUser?.name || 'Audius account'}</p>
+              <p className={styles.subtext}>Audius · @{audiusProfile?.handle || audiusUser?.handle}</p>
             </div>
             <div className={styles.profileMeta}>
-              <span className={styles.mono}>{audiusProfile.track_count} tracks</span>
-              {typeof audiusProfile.playlist_count === 'number' && (
-                <span className={styles.monoValue}>{audiusProfile.playlist_count} playlists</span>
+              <span className={styles.mono}>{audiusProfile?.track_count ?? audiusTracks.length} tracks</span>
+              {typeof audiusProfile?.playlist_count === 'number' && (
+                <span className={styles.monoValue}>{audiusProfile?.playlist_count} playlists</span>
+              )}
+              {isOwn && audiusUser && (
+                <div className={styles.sampleLinks}>
+                  <button type="button" className={styles.copyBtn} onClick={handleLinkAudiusToProfile} disabled={linkingAudius}>
+                    {linkingAudius ? 'Linking…' : 'Link Audius to profile'}
+                  </button>
+                  <button type="button" className={styles.copyBtn} onClick={logout}>
+                    Disconnect Audius
+                  </button>
+                </div>
               )}
             </div>
           </div>
+          {linkAudiusError && <p className={styles.error} style={{ marginTop: '10px' }}>{linkAudiusError}</p>}
+          {linkAudiusSuccess && <p className={styles.subtext} style={{ marginTop: '10px' }}>{linkAudiusSuccess}</p>}
+          {linkAudiusDebug && (
+            <pre className={styles.subtext} style={{ whiteSpace: 'pre-wrap', marginTop: '10px' }}>
+              {JSON.stringify(linkAudiusDebug, null, 2)}
+            </pre>
+          )}
+          <div className={styles.audiusMiniWrap}>
+            <div className={styles.audiusMiniHeader}>
+              <h3 className={styles.sectionTitle}>Audius catalog</h3>
+              <div className={styles.audiusMiniActions}>
+                {hasMoreAudiusCatalog && (
+                  <button
+                    type="button"
+                    className={styles.copyBtn}
+                    onClick={() => setAudiusCatalogExpanded((v) => !v)}
+                  >
+                    {audiusCatalogExpanded ? 'Show less' : 'Show more'}
+                  </button>
+                )}
+                <a className={styles.link} href="#/vault/library">Open full view</a>
+              </div>
+            </div>
+            {audiusCatalogError && <p className={styles.error}>{audiusCatalogError}</p>}
+            {audiusCatalogLoading ? (
+              <p className={styles.subtext}>Loading tracks and albums…</p>
+            ) : (
+              <>
+                {visibleAudiusAlbums.length > 0 && (
+                  <div>
+                    <p className={styles.subtext}>Albums</p>
+                    <div className={styles.audiusMiniChips}>
+                      {visibleAudiusAlbums.map((album) => (
+                        <a
+                          key={album.id}
+                          className={styles.audiusMiniChip}
+                          href={toAudiusUrl(album.permalink)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {album.playlist_name} ({album.track_count})
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {visibleAudiusPlaylists.length > 0 && (
+                  <div>
+                    <p className={styles.subtext}>Playlists</p>
+                    <div className={styles.audiusMiniChips}>
+                      {visibleAudiusPlaylists.map((playlist) => (
+                        <a
+                          key={playlist.id}
+                          className={styles.audiusMiniChip}
+                          href={toAudiusUrl(playlist.permalink)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {playlist.playlist_name} ({playlist.track_count})
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {visibleAudiusTracks.length > 0 ? (
+                  <div className={styles.audiusMiniList}>
+                    {visibleAudiusTracks.map((track) => (
+                      <div key={track.id} className={styles.audiusMiniItem}>
+                        {getArtworkUrl(track) ? (
+                          <img className={styles.audiusMiniArt} src={getArtworkUrl(track) || ''} alt="" />
+                        ) : (
+                          <div className={styles.audiusMiniArtPlaceholder} />
+                        )}
+                        <div className={styles.audiusMiniMeta}>
+                          <span className={styles.mono}>{track.title}</span>
+                          <span className={styles.subtext}>@{track.user.handle}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className={styles.copyBtn}
+                          onClick={() => {
+                            const playable = toPlayableTrack(track);
+                            const isCurrent = currentTrack?.id === playable.id;
+                            if (isCurrent && isPlaying) pause();
+                            else play(playable);
+                          }}
+                        >
+                          {currentTrack?.id === track.id && isPlaying ? 'Pause' : 'Play'}
+                        </button>
+                        {isOwn && (
+                          <button
+                            type="button"
+                            className={styles.copyBtn}
+                            onClick={() => setPublishTrack(toPlayableTrack(track))}
+                          >
+                            Publish
+                          </button>
+                        )}
+                        <a
+                          className={styles.link}
+                          href={toAudiusUrl(track.permalink)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Open
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className={styles.subtext}>No Audius tracks found for this handle yet.</p>
+                )}
+              </>
+            )}
+          </div>
+        </section>
+      )}
+
+      {isOwn && !audiusUser && (
+        <section className={styles.section + ' ' + styles.sectionTight}>
+          <div className={styles.sectionHeader}>
+            <h2 className={styles.sectionTitle}>Audius account</h2>
+          </div>
+          <p className={styles.subtext}>
+            Connect Audius to load your tracks/albums here and publish your own catalog to Arweave.
+          </p>
+          <p className={styles.subtext} style={{ marginTop: '8px' }}>
+            If your Audius account uses email/social login, open Audius first and sign in there before connecting.
+          </p>
+          {apiKeyConfigured ? (
+            <div className={styles.sampleLinks} style={{ marginTop: '10px' }}>
+              <button
+                type="button"
+                className={styles.copyBtn}
+                onClick={openAudiusLogin}
+              >
+                Open Audius first
+              </button>
+              <button
+                type="button"
+                className={styles.primaryBtn}
+                onClick={login}
+                disabled={isLoggingIn}
+              >
+                {isLoggingIn ? 'Connecting…' : 'Connect Audius'}
+              </button>
+            </div>
+          ) : (
+            <p className={styles.error}>Audius login is not configured for this app.</p>
+          )}
+          {audiusAuthError && <p className={styles.error}>{audiusAuthError}</p>}
         </section>
       )}
       <section className={styles.section}>
         <p className={styles.text}>
           Share your profile: <strong>{shareUrl}</strong>
         </p>
+        <div className={styles.sampleLinks} style={{ marginTop: '8px' }}>
+          <button type="button" className={styles.copyBtn} onClick={handleCopyShareUrl}>
+            {copiedShareUrl ? 'Copied share URL' : 'Copy share URL'}
+          </button>
+          {normalizedProfile?.id && (
+            <button type="button" className={styles.copyBtn} onClick={handleCopyProfileId}>
+              {copiedProfileId ? 'Copied profile ID' : 'Copy profile ID'}
+            </button>
+          )}
+        </div>
         <p className={styles.subtext}>
           Permanently published tracks and atomic assets you create will appear here. Connect with the same wallet you use as the verified artist to publish.
         </p>
@@ -1077,6 +1595,13 @@ export function Profile() {
           initialBannerValue={normalizedProfile?.banner || normalizedProfile?.Banner || null}
           initialAudiusHandle={normalizedProfile?.audiusHandle || audiusProfile?.handle || audiusUser?.handle}
           onCreate={handleEditProfile}
+        />
+      )}
+      {publishTrack && (
+        <PublishModal
+          track={publishTrack}
+          onClose={() => setPublishTrack(null)}
+          onSuccess={() => setPublishTrack(null)}
         />
       )}
     </div>

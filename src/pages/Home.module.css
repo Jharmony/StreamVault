@@ -34,19 +34,25 @@
 }
 
 .audiusSection {
-  padding: 24px;
+  padding: 32px;
   margin-bottom: 32px;
-  border-radius: var(--radius-xl);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--bg-glass-border);
+  border-radius: 32px;
+  background:
+    radial-gradient(circle at top, rgba(124, 92, 255, 0.1), transparent 42%),
+    rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .audiusHeader {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  margin-bottom: 22px;
+  text-align: center;
+}
+
+.audiusIntro {
+  max-width: 680px;
 }
 
 .sectionTitle {
@@ -58,33 +64,42 @@
 .sectionSubtitle {
   font-size: var(--text-sm);
   color: var(--text-secondary);
+  line-height: 1.6;
 }
 
 .audiusSearch {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
+  width: min(760px, 100%);
+  padding: 10px;
+  background: rgba(19, 19, 22, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.28);
 }
 
 .audiusInput {
-  min-width: 260px;
-  padding: 10px 12px;
-  font-size: var(--text-sm);
+  min-width: 0;
+  flex: 1;
+  padding: 16px 22px;
+  font-size: var(--text-base);
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--bg-glass-border);
-  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
   outline: none;
 }
 
 .audiusBtn {
-  padding: 10px 16px;
+  padding: 14px 22px;
   font-size: var(--text-sm);
   font-weight: var(--font-semibold);
   color: #fff;
   background: var(--accent);
-  border-radius: var(--radius-md);
+  border-radius: 999px;
   transition: opacity 0.15s;
+  white-space: nowrap;
 }
 
 .audiusBtn:hover:not(:disabled) {
@@ -250,4 +265,27 @@
   font-weight: var(--font-semibold);
   color: var(--text-primary);
   margin: 12px 0;
+}
+
+@media (max-width: 720px) {
+  .audiusSection {
+    padding: 22px 18px;
+    border-radius: 24px;
+  }
+
+  .audiusSearch {
+    width: 100%;
+    padding: 8px;
+    flex-direction: column;
+    border-radius: 24px;
+  }
+
+  .audiusInput,
+  .audiusBtn {
+    width: 100%;
+  }
+
+  .audiusBtn {
+    padding: 12px 18px;
+  }
 }

@@ -16,7 +16,6 @@ import {
 import type { Track } from '../context/PlayerContext';
 import { TrackCard } from '../components/TrackCard';
 import { LogoSpinner } from '../components/LogoSpinner';
-import { PublishModal } from '../components/PublishModal';
 import styles from './Home.module.css';
 import { useWallet } from '../context/WalletContext';
 import { usePermaweb } from '../context/PermawebContext';
@@ -40,7 +39,8 @@ export function Home() {
   const { libs, isReady } = usePermaweb();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
-  const [publishTrack, setPublishTrack] = useState<Track | null>(null);
+  const [discoverLimit, setDiscoverLimit] = useState(24);
+  const [discoverLoadingMore, setDiscoverLoadingMore] = useState(false);
   const [audiusQuery, setAudiusQuery] = useState('');
   const [audiusUser, setAudiusUser] = useState<AudiusUser | null>(null);
   const [audiusPlaylists, setAudiusPlaylists] = useState<AudiusPlaylist[]>([]);
@@ -200,18 +200,22 @@ export function Home() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      if (discoverLimit <= 24) setLoading(true);
+      else setDiscoverLoadingMore(true);
       try {
-        const data = await getTrendingTracks(24);
+        const data = await getTrendingTracks(discoverLimit);
         if (!cancelled) setTracks(data.map(mapAudiusToTrack));
       } catch (e) {
         if (!cancelled) setTracks([]);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setDiscoverLoadingMore(false);
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [discoverLimit]);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,10 +240,10 @@ export function Home() {
     <div className={styles.page}>
       <section className={styles.audiusSection}>
         <div className={styles.audiusHeader}>
-          <div>
+          <div className={styles.audiusIntro}>
             <h2 className={styles.sectionTitle}>Audius profiles</h2>
             <p className={styles.sectionSubtitle}>
-              Load an artist profile, playlists, and tracks by handle or URL.
+              Load an artist profile, playlists, and tracks by handle or URL. Publishing is owner-only in Vault.
             </p>
           </div>
           <div className={styles.audiusSearch}>
@@ -247,7 +251,7 @@ export function Home() {
               className={styles.audiusInput}
               value={audiusQuery}
               onChange={(e) => setAudiusQuery(e.target.value)}
-              placeholder="artist handle or audius.co/username"
+              placeholder="Search Audius by handle or paste audius.co/username"
             />
             <button
               type="button"
@@ -336,7 +340,7 @@ export function Home() {
                 {playlistTracks[playlist.id] && (
                   <div className={styles.playlistTracks}>
                     {playlistTracks[playlist.id].map((track) => (
-                      <TrackCard key={track.id} track={track} onPublishClick={() => setPublishTrack(track)} />
+                      <TrackCard key={track.id} track={track} />
                     ))}
                   </div>
                 )}
@@ -350,7 +354,7 @@ export function Home() {
             <h3 className={styles.subsectionTitle}>Artist tracks</h3>
             <section className={styles.grid}>
               {audiusTracks.map((track) => (
-                <TrackCard key={track.id} track={track} onPublishClick={() => setPublishTrack(track)} />
+                <TrackCard key={track.id} track={track} />
               ))}
             </section>
           </>
@@ -375,23 +379,30 @@ export function Home() {
       {loading ? (
         <LogoSpinner />
       ) : (
-        <section className={styles.grid}>
-          {tracks.map((track) => (
-            <TrackCard
-              key={track.id}
-              track={track}
-              onPublishClick={() => setPublishTrack(track)}
-            />
-          ))}
-        </section>
-      )}
-
-      {publishTrack && (
-        <PublishModal
-          track={publishTrack}
-          onClose={() => setPublishTrack(null)}
-          onSuccess={() => setPublishTrack(null)}
-        />
+        <>
+          <section className={styles.grid}>
+            {tracks.map((track) => (
+              <TrackCard
+                key={track.id}
+                track={track}
+              />
+            ))}
+          </section>
+          <div className={styles.audiusCta} style={{ marginTop: '16px' }}>
+            <div>
+              <p className={styles.ctaTitle}>More from Discover</p>
+              <p className={styles.ctaCopy}>Load additional tracks from Audius trending.</p>
+            </div>
+            <button
+              type="button"
+              className={styles.ctaBtn}
+              onClick={() => setDiscoverLimit((n) => n + 24)}
+              disabled={discoverLoadingMore}
+            >
+              {discoverLoadingMore ? 'Loading more…' : 'Load more music'}
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
