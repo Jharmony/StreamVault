@@ -987,13 +987,12 @@ export function Profile() {
       }
 
       await writableLibs.updateProfile(args, normalizedProfile.id);
-      if (writableLibs.updateZone) {
+      const nextAudiusHandle = form.audiusHandle?.trim() || '';
+      const currentAudiusHandle = String(normalizedProfile?.audiusHandle || '').trim();
+      if (writableLibs.updateZone && nextAudiusHandle !== currentAudiusHandle) {
         await writableLibs.updateZone(
           {
-            Name: form.displayName.trim(),
-            Handle: form.username.trim(),
-            Bio: form.description.trim(),
-            AudiusHandle: form.audiusHandle?.trim() || '',
+            AudiusHandle: nextAudiusHandle,
           },
           normalizedProfile.id
         );
