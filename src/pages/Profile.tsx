@@ -50,6 +50,8 @@ type PermaProfile = {
   audiusHandle?: string;
   thumbnail?: string | null;
   banner?: string | null;
+  thumbnailTxId?: string | null;
+  bannerTxId?: string | null;
   assets?: any[];
 };
 
@@ -866,6 +868,8 @@ export function Profile() {
         description: args.description,
         thumbnail: immediateThumbnail,
         banner: immediateBanner,
+        thumbnailTxId: thumbnailId,
+        bannerTxId: bannerId,
       });
       if (typeof window !== 'undefined') {
         const next = {
@@ -876,6 +880,8 @@ export function Profile() {
           description: args.description,
           thumbnail: immediateThumbnail,
           banner: immediateBanner,
+          thumbnailTxId: thumbnailId,
+          bannerTxId: bannerId,
         };
         try {
           localStorage.setItem(getProfileSnapshotKey(connectedAddress), JSON.stringify(next));
@@ -999,6 +1005,12 @@ export function Profile() {
         description: form.description.trim(),
         thumbnail: args.thumbnail || normalizedProfile?.thumbnail || normalizedProfile?.Thumbnail || null,
         banner: args.banner || normalizedProfile?.banner || normalizedProfile?.Banner || null,
+        thumbnailTxId: form.thumbnail
+          ? null
+          : (normalizedProfile as any)?.thumbnailTxId || normalizedProfile?.thumbnail || normalizedProfile?.Thumbnail || null,
+        bannerTxId: form.banner
+          ? null
+          : (normalizedProfile as any)?.bannerTxId || normalizedProfile?.banner || normalizedProfile?.Banner || null,
         audiusHandle: form.audiusHandle?.trim() || '',
       };
       setProfile(optimistic);
@@ -1696,8 +1708,8 @@ export function Profile() {
           initialDescription={profileBio || normalizedProfile?.description || ''}
           initialAvatarUrl={avatarSource}
           initialBannerUrl={bannerSource}
-          initialThumbnailValue={normalizedProfile?.thumbnail || normalizedProfile?.Thumbnail || null}
-          initialBannerValue={normalizedProfile?.banner || normalizedProfile?.Banner || null}
+          initialThumbnailValue={(normalizedProfile as any)?.thumbnailTxId || normalizedProfile?.thumbnail || normalizedProfile?.Thumbnail || null}
+          initialBannerValue={(normalizedProfile as any)?.bannerTxId || normalizedProfile?.banner || normalizedProfile?.Banner || null}
           initialAudiusHandle={normalizedProfile?.audiusHandle || audiusProfile?.handle || audiusUser?.handle}
           onCreate={handleEditProfile}
         />
