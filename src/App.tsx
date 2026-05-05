@@ -15,6 +15,7 @@ import { VaultWallet } from './pages/vault/VaultWallet';
 import { VaultRewards } from './pages/vault/VaultRewards';
 import { VaultPlaceholder } from './pages/vault/VaultPlaceholder';
 import { usePlayer } from './context/PlayerContext';
+import { SpotifyCallback } from './pages/SpotifyCallback';
 
 const GA_MEASUREMENT_ID = 'G-HBLXEBQB7H';
 
@@ -67,6 +68,7 @@ export default function App() {
       <RouteAnalytics />
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/spotify/callback" element={<SpotifyCallback />} />
         <Route path="/artist/:id" element={<Artist />} />
         <Route path="/profile/:address" element={<Profile />} />
         <Route path="/creator-tools" element={<CreatorTools />} />

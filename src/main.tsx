@@ -9,6 +9,7 @@ import { PermawebProvider } from './context/PermawebContext';
 import { GeneratedCoverProvider } from './context/GeneratedCoverContext';
 import { GeneratedAudioProvider } from './context/GeneratedAudioContext';
 import { AudiusAuthProvider } from './context/AudiusAuthContext';
+import { SpotifyAuthProvider } from './context/SpotifyAuthContext';
 import { ArweaveWalletKit } from '@arweave-wallet-kit/react';
 import WanderStrategy from '@arweave-wallet-kit/wander-strategy';
 import BrowserWalletStrategy from '@arweave-wallet-kit/browser-wallet-strategy';
@@ -20,43 +21,45 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <HashRouter>
       <ThemeProvider>
         <AudiusAuthProvider>
-          <ArweaveWalletKit
-            config={{
-              permissions: [
-                'ACCESS_ADDRESS',
-                'ACCESS_PUBLIC_KEY',
-                'SIGN_TRANSACTION',
-                'SIGNATURE',
-                'DISPATCH',
-              ],
-              ensurePermissions: true,
-              strategies: [
-                new WanderStrategy(),
-                new BrowserWalletStrategy(),
-                new AoSyncStrategy(),
-              ],
-              appInfo: {
-                name: 'StreamVault',
-              },
-              gatewayConfig: {
-                host: 'arweave.net',
-                port: 443,
-                protocol: 'https',
-              },
-            }}
-          >
-            <WalletProvider>
-              <PermawebProvider>
-                <GeneratedCoverProvider>
-                  <GeneratedAudioProvider>
-                    <PlayerProvider>
-                      <App />
-                    </PlayerProvider>
-                  </GeneratedAudioProvider>
-                </GeneratedCoverProvider>
-              </PermawebProvider>
-            </WalletProvider>
-          </ArweaveWalletKit>
+          <SpotifyAuthProvider>
+            <ArweaveWalletKit
+              config={{
+                permissions: [
+                  'ACCESS_ADDRESS',
+                  'ACCESS_PUBLIC_KEY',
+                  'SIGN_TRANSACTION',
+                  'SIGNATURE',
+                  'DISPATCH',
+                ],
+                ensurePermissions: true,
+                strategies: [
+                  new WanderStrategy(),
+                  new BrowserWalletStrategy(),
+                  new AoSyncStrategy(),
+                ],
+                appInfo: {
+                  name: 'StreamVault',
+                },
+                gatewayConfig: {
+                  host: 'arweave.net',
+                  port: 443,
+                  protocol: 'https',
+                },
+              }}
+            >
+              <WalletProvider>
+                <PermawebProvider>
+                  <GeneratedCoverProvider>
+                    <GeneratedAudioProvider>
+                      <PlayerProvider>
+                        <App />
+                      </PlayerProvider>
+                    </GeneratedAudioProvider>
+                  </GeneratedCoverProvider>
+                </PermawebProvider>
+              </WalletProvider>
+            </ArweaveWalletKit>
+          </SpotifyAuthProvider>
         </AudiusAuthProvider>
       </ThemeProvider>
     </HashRouter>
