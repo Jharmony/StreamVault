@@ -71,7 +71,10 @@ export function SpotifyAuthProvider({ children }: { children: React.ReactNode })
 
   const clientId = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_SPOTIFY_CLIENT_ID : undefined;
   const clientIdConfigured = Boolean(clientId?.trim());
-  const redirectUri = useMemo(() => getDefaultSpotifyRedirectUri(), []);
+  const redirectUri = useMemo(() => {
+    const override = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_SPOTIFY_REDIRECT_URI : undefined;
+    return String(override || '').trim() || getDefaultSpotifyRedirectUri();
+  }, []);
 
   const scope = useMemo(
     () =>

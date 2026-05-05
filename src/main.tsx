@@ -16,6 +16,15 @@ import BrowserWalletStrategy from '@arweave-wallet-kit/browser-wallet-strategy';
 import AoSyncStrategy from '@vela-ventures/aosync-strategy';
 import './styles/global.css';
 
+// If Spotify redirects to a "real" path (no hash), forward into HashRouter.
+if (typeof window !== 'undefined') {
+  const isSpotifyCallbackPath = window.location.pathname.replace(/\/+$/, '') === '/spotify/callback';
+  const isAlreadyHashCallback = (window.location.hash || '').startsWith('#/spotify/callback');
+  if (isSpotifyCallbackPath && !isAlreadyHashCallback) {
+    window.location.replace(`/#/spotify/callback${window.location.search || ''}`);
+  }
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <HashRouter>

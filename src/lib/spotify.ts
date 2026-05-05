@@ -84,8 +84,9 @@ export async function createPkcePair() {
 
 export function getDefaultSpotifyRedirectUri(): string {
   if (typeof window === 'undefined') return '';
-  // For HashRouter we prefer: origin + "/#/spotify/callback"
-  return `${window.location.origin}/#/spotify/callback`;
+  // Spotify OAuth redirect URIs should not include a fragment (#).
+  // Even if the app uses HashRouter, we can redirect /spotify/callback -> #/spotify/callback at runtime.
+  return `${window.location.origin}/spotify/callback`;
 }
 
 export function buildSpotifyAuthorizeUrl(args: {
