@@ -8,6 +8,32 @@ const OAUTH_REDIRECT_URI_KEY = 'streamvault:spotify_oauth_redirect_uri';
 const OAUTH_LAST_CODE_KEY = 'streamvault:spotify_oauth_last_code';
 const OAUTH_LAST_CODE_AT_KEY = 'streamvault:spotify_oauth_last_code_at';
 
+// Fallback for cases where the callback opens in a new tab/window, where sessionStorage is empty.
+// Note: localStorage is still origin-scoped by the browser; we include origin in the key for clarity.
+function getOriginScopedKey(base: string): string {
+  if (typeof window === 'undefined') return base;
+  return `${base}:${window.location.origin}`;
+}
+
+const PKCE_VERIFIER_KEY_LOCAL = getOriginScopedKey('streamvault:spotify_pkce_verifier:local');
+const OAUTH_STATE_KEY_LOCAL = getOriginScopedKey('streamvault:spotify_oauth_state:local');
+const OAUTH_REDIRECT_URI_KEY_LOCAL = getOriginScopedKey('streamvault:spotify_oauth_redirect_uri:local');
+
+function isSpotifyDebugEnabled(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return typeof import.meta !== 'undefined' && String((import.meta as any)?.env?.VITE_DEBUG_SPOTIFY || '') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function spotifyDebugLog(...args: any[]) {
+  if (!isSpotifyDebugEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.debug('[spotify]', ...args);
+}
+
 export type SpotifyAuthTokens = {
   accessToken: string;
   refreshToken?: string;
@@ -139,6 +165,19 @@ export function beginSpotifyLogin(params: {
     sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
     sessionStorage.setItem(OAUTH_STATE_KEY, state);
     sessionStorage.setItem(OAUTH_REDIRECT_URI_KEY, redirectUri);
+
+    // Fallback for new-tab callbacks
+    localStorage.setItem(PKCE_VERIFIER_KEY_LOCAL, verifier);
+    localStorage.setItem(OAUTH_STATE_KEY_LOCAL, state);
+    localStorage.setItem(OAUTH_REDIRECT_URI_KEY_LOCAL, redirectUri);
+
+    spotifyDebugLog('begin login', {
+      origin: window.location.origin,
+      redirectUri,
+      hasSessionStorage: true,
+      statePrefix: state.slice(0, 8),
+      verifierPrefix: verifier.slice(0, 8),
+    });
     // New login attempt, so allow processing a new code.
     sessionStorage.removeItem(OAUTH_LAST_CODE_KEY);
     sessionStorage.removeItem(OAUTH_LAST_CODE_AT_KEY);
@@ -155,7 +194,7 @@ export function beginSpotifyLogin(params: {
 
 export function getSpotifyRedirectUriForExchange(fallbackRedirectUri: string): string {
   if (typeof window === 'undefined') return normalizeSpotifyRedirectUri(fallbackRedirectUri);
-  const stored = sessionStorage.getItem(OAUTH_REDIRECT_URI_KEY);
+  const stored = sessionStorage.getItem(OAUTH_REDIRECT_URI_KEY) || localStorage.getItem(OAUTH_REDIRECT_URI_KEY_LOCAL);
   return normalizeSpotifyRedirectUri(stored || '') || normalizeSpotifyRedirectUri(fallbackRedirectUri) || getDefaultSpotifyRedirectUri();
 }
 
@@ -223,7 +262,7 @@ export async function exchangeSpotifyCodeForTokens(args: {
   code: string;
 }): Promise<SpotifyAuthTokens> {
   if (typeof window === 'undefined') throw new Error('Spotify OAuth must run in browser.');
-  const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
+  const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY) || localStorage.getItem(PKCE_VERIFIER_KEY_LOCAL);
   if (!verifier) throw new Error('Missing Spotify PKCE verifier. Please try connecting again.');
 
   const body = new URLSearchParams();
@@ -309,11 +348,15 @@ export function clearSpotifyOAuthSession() {
   sessionStorage.removeItem(PKCE_VERIFIER_KEY);
   sessionStorage.removeItem(OAUTH_STATE_KEY);
   sessionStorage.removeItem(OAUTH_REDIRECT_URI_KEY);
+
+  localStorage.removeItem(PKCE_VERIFIER_KEY_LOCAL);
+  localStorage.removeItem(OAUTH_STATE_KEY_LOCAL);
+  localStorage.removeItem(OAUTH_REDIRECT_URI_KEY_LOCAL);
 }
 
 export function getExpectedSpotifyState(): string | null {
   if (typeof window === 'undefined') return null;
-  return sessionStorage.getItem(OAUTH_STATE_KEY);
+  return sessionStorage.getItem(OAUTH_STATE_KEY) || localStorage.getItem(OAUTH_STATE_KEY_LOCAL);
 }
 
 export function finalizeSpotifyOAuthUrlCleanup() {
