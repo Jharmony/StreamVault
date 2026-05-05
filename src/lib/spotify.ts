@@ -4,6 +4,9 @@ const SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 const STORAGE_KEY = 'streamvault:spotify_tokens';
 const PKCE_VERIFIER_KEY = 'streamvault:spotify_pkce_verifier';
 const OAUTH_STATE_KEY = 'streamvault:spotify_oauth_state';
+const OAUTH_REDIRECT_URI_KEY = 'streamvault:spotify_oauth_redirect_uri';
+const OAUTH_LAST_CODE_KEY = 'streamvault:spotify_oauth_last_code';
+const OAUTH_LAST_CODE_AT_KEY = 'streamvault:spotify_oauth_last_code_at';
 
 export type SpotifyAuthTokens = {
   accessToken: string;
@@ -89,6 +92,22 @@ export function getDefaultSpotifyRedirectUri(): string {
   return `${window.location.origin}/spotify/callback`;
 }
 
+export function normalizeSpotifyRedirectUri(input: string): string {
+  const trimmed = String(input || '').trim();
+  if (!trimmed) return '';
+  try {
+    const u = new URL(trimmed);
+    // Spotify compares redirect URIs exactly. Ensure we never include a hash.
+    u.hash = '';
+    // Also avoid carrying a query string in redirect_uri.
+    u.search = '';
+    return u.toString();
+  } catch {
+    // If it's not a valid absolute URL, leave it unchanged; caller can fallback.
+    return trimmed;
+  }
+}
+
 export function buildSpotifyAuthorizeUrl(args: {
   clientId: string;
   redirectUri: string;
@@ -116,17 +135,43 @@ export function beginSpotifyLogin(params: {
   return (async () => {
     const { verifier, challenge } = await createPkcePair();
     const state = randomString(48);
+    const redirectUri = normalizeSpotifyRedirectUri(params.redirectUri) || getDefaultSpotifyRedirectUri();
     sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
     sessionStorage.setItem(OAUTH_STATE_KEY, state);
+    sessionStorage.setItem(OAUTH_REDIRECT_URI_KEY, redirectUri);
+    // New login attempt, so allow processing a new code.
+    sessionStorage.removeItem(OAUTH_LAST_CODE_KEY);
+    sessionStorage.removeItem(OAUTH_LAST_CODE_AT_KEY);
     const authUrl = buildSpotifyAuthorizeUrl({
       clientId: params.clientId,
-      redirectUri: params.redirectUri,
+      redirectUri,
       codeChallenge: challenge,
       state,
       scope: params.scope,
     });
     window.location.assign(authUrl);
   })();
+}
+
+export function getSpotifyRedirectUriForExchange(fallbackRedirectUri: string): string {
+  if (typeof window === 'undefined') return normalizeSpotifyRedirectUri(fallbackRedirectUri);
+  const stored = sessionStorage.getItem(OAUTH_REDIRECT_URI_KEY);
+  return normalizeSpotifyRedirectUri(stored || '') || normalizeSpotifyRedirectUri(fallbackRedirectUri) || getDefaultSpotifyRedirectUri();
+}
+
+export function wasSpotifyOAuthCodeProcessed(code: string, withinMs = 2 * 60 * 1000): boolean {
+  if (typeof window === 'undefined') return false;
+  const lastCode = sessionStorage.getItem(OAUTH_LAST_CODE_KEY);
+  const at = Number(sessionStorage.getItem(OAUTH_LAST_CODE_AT_KEY) || 0);
+  if (!lastCode || !at) return false;
+  if (lastCode !== code) return false;
+  return Date.now() - at <= withinMs;
+}
+
+export function markSpotifyOAuthCodeProcessed(code: string) {
+  if (typeof window === 'undefined') return;
+  sessionStorage.setItem(OAUTH_LAST_CODE_KEY, code);
+  sessionStorage.setItem(OAUTH_LAST_CODE_AT_KEY, String(Date.now()));
 }
 
 export function parseOAuthParams(search: string, hash: string) {
@@ -263,6 +308,7 @@ export function clearSpotifyOAuthSession() {
   if (typeof window === 'undefined') return;
   sessionStorage.removeItem(PKCE_VERIFIER_KEY);
   sessionStorage.removeItem(OAUTH_STATE_KEY);
+  sessionStorage.removeItem(OAUTH_REDIRECT_URI_KEY);
 }
 
 export function getExpectedSpotifyState(): string | null {

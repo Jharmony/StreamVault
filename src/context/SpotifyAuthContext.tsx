@@ -6,13 +6,17 @@ import {
   fetchSpotifyMe,
   fetchSpotifySavedTracks,
   finalizeSpotifyOAuthUrlCleanup,
+  getSpotifyRedirectUriForExchange,
   getDefaultSpotifyRedirectUri,
   getExpectedSpotifyState,
   isTokenExpired,
   loadStoredSpotifyTokens,
+  markSpotifyOAuthCodeProcessed,
   parseOAuthParams,
   refreshSpotifyAccessToken,
   storeSpotifyTokens,
+  wasSpotifyOAuthCodeProcessed,
+  normalizeSpotifyRedirectUri,
   type SpotifyAuthTokens,
   type SpotifySavedTrackItem,
   type SpotifyUserProfile,
@@ -73,7 +77,8 @@ export function SpotifyAuthProvider({ children }: { children: React.ReactNode })
   const clientIdConfigured = Boolean(clientId?.trim());
   const redirectUri = useMemo(() => {
     const override = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_SPOTIFY_REDIRECT_URI : undefined;
-    return String(override || '').trim() || getDefaultSpotifyRedirectUri();
+    const raw = String(override || '').trim() || getDefaultSpotifyRedirectUri();
+    return normalizeSpotifyRedirectUri(raw) || getDefaultSpotifyRedirectUri();
   }, []);
 
   const scope = useMemo(
@@ -178,6 +183,14 @@ export function SpotifyAuthProvider({ children }: { children: React.ReactNode })
       return;
     }
 
+    // In dev, React.StrictMode runs effects twice, which can trigger two exchanges for the same one-time code.
+    // Also, our /spotify/callback -> /#/spotify/callback shim can cause rapid re-entry during redirects.
+    if (wasSpotifyOAuthCodeProcessed(code)) {
+      clearSpotifyOAuthSession();
+      finalizeSpotifyOAuthUrlCleanup();
+      return;
+    }
+
     const expected = getExpectedSpotifyState();
     if (!expected || expected !== state) {
       setAuthError('Spotify OAuth state mismatch. Please try again.');
@@ -187,9 +200,10 @@ export function SpotifyAuthProvider({ children }: { children: React.ReactNode })
 
     setStatus('connecting');
     try {
+      markSpotifyOAuthCodeProcessed(code);
       const next = await exchangeSpotifyCodeForTokens({
         clientId: clientId.trim(),
-        redirectUri,
+        redirectUri: getSpotifyRedirectUriForExchange(redirectUri),
         code,
       });
       if (!next.accessToken) throw new Error('Spotify returned an empty access token.');
