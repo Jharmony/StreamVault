@@ -28,6 +28,12 @@ function rpcWebsocketsShimPlugin() {
 export default defineConfig({
     plugins: [react(), nodePolyfills(), rpcWebsocketsShimPlugin()],
     base: './',
+    server: {
+        allowedHosts: [
+            'clasp-manor-constrain.ngrok-free.dev',
+            '.ngrok-free.dev',
+        ],
+    },
     optimizeDeps: {
         exclude: ['rpc-websockets'],
     },
