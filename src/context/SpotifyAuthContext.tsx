@@ -41,6 +41,7 @@ interface SpotifyAuthContextValue {
   imports: SpotifyImportItem[];
   importsLoading: boolean;
   connect: () => void;
+  restartConnect: () => void;
   disconnect: () => void;
   completeFromRedirect: () => Promise<void>;
   refreshIfNeeded: () => Promise<SpotifyAuthTokens | null>;
@@ -48,6 +49,21 @@ interface SpotifyAuthContextValue {
 }
 
 const SpotifyAuthContext = createContext<SpotifyAuthContextValue | null>(null);
+
+function isSpotifyDebugEnabled(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return typeof import.meta !== 'undefined' && String((import.meta as any)?.env?.VITE_DEBUG_SPOTIFY || '') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function spotifyDebugLog(...args: any[]) {
+  if (!isSpotifyDebugEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.debug('[spotify]', ...args);
+}
 
 function mapSavedTracks(items: SpotifySavedTrackItem[]): SpotifyImportItem[] {
   return items.map((item) => {
@@ -154,6 +170,11 @@ export function SpotifyAuthProvider({ children }: { children: React.ReactNode })
     });
   }, [clientId, redirectUri, scope]);
 
+  const restartConnect = useCallback(() => {
+    clearSpotifyOAuthSession();
+    connect();
+  }, [connect]);
+
   const disconnect = useCallback(() => {
     storeSpotifyTokens(null);
     setTokens(null);
@@ -171,16 +192,25 @@ export function SpotifyAuthProvider({ children }: { children: React.ReactNode })
       typeof window !== 'undefined' ? window.location.hash : ''
     );
 
+    spotifyDebugLog('callback params', {
+      origin: typeof window !== 'undefined' ? window.location.origin : null,
+      hasCode: Boolean(code),
+      hasState: Boolean(state),
+      hasError: Boolean(error),
+    });
+
     if (error) {
-      setAuthError(`Spotify OAuth error: ${error}`);
+      const msg = `Spotify OAuth error: ${error}`;
+      setAuthError(msg);
       setStatus('error');
-      return;
+      throw new Error(msg);
     }
 
     if (!code || !state) {
-      setAuthError('Missing Spotify OAuth response parameters.');
+      const msg = 'Missing Spotify OAuth response parameters.';
+      setAuthError(msg);
       setStatus('error');
-      return;
+      throw new Error(msg);
     }
 
     // In dev, React.StrictMode runs effects twice, which can trigger two exchanges for the same one-time code.
@@ -193,9 +223,19 @@ export function SpotifyAuthProvider({ children }: { children: React.ReactNode })
 
     const expected = getExpectedSpotifyState();
     if (!expected || expected !== state) {
-      setAuthError('Spotify OAuth state mismatch. Please try again.');
+      const msg = 'Spotify OAuth state mismatch. Please try again.';
+      setAuthError(msg);
       setStatus('error');
-      return;
+      const err: any = new Error(msg);
+      err.code = 'SPOTIFY_STATE_MISMATCH';
+      err.meta = {
+        expectedPresent: Boolean(expected),
+        expectedPrefix: expected ? expected.slice(0, 8) : null,
+        receivedPrefix: state.slice(0, 8),
+        origin: typeof window !== 'undefined' ? window.location.origin : null,
+      };
+      spotifyDebugLog('state mismatch', err.meta);
+      throw err;
     }
 
     setStatus('connecting');
@@ -243,6 +283,7 @@ export function SpotifyAuthProvider({ children }: { children: React.ReactNode })
       imports,
       importsLoading,
       connect,
+      restartConnect,
       disconnect,
       completeFromRedirect,
       refreshIfNeeded,
@@ -257,6 +298,7 @@ export function SpotifyAuthProvider({ children }: { children: React.ReactNode })
       imports,
       importsLoading,
       connect,
+      restartConnect,
       disconnect,
       completeFromRedirect,
       refreshIfNeeded,
