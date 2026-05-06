@@ -26,8 +26,6 @@ import { queryPermanentUploads } from '../lib/arweaveDiscovery';
 import { uploadedTrackToPlayerTrack, type UploadedTrackRecord } from '../lib/uploadedTracks';
 import { useAudiusAuth } from '../context/AudiusAuthContext';
 import { PublishModal } from '../components/PublishModal';
-import { HomeSpotifyCatalogSection } from '../components/HomeSpotifyCatalogSection';
-import { isSpotifyCatalogEnabled } from '../lib/spotify';
 
 function mapAudiusToTrack(a: AudiusTrack): Track {
   return {
@@ -71,7 +69,6 @@ export function Home() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [hasPermaProfile, setHasPermaProfile] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
-  const spotifyCatalogOn = isSpotifyCatalogEnabled();
 
   const discoverTracks = useMemo(() => {
     const isFeedTestTrack = (title: string) => title.toLowerCase().includes('test');
@@ -327,9 +324,7 @@ export function Home() {
       <section className={styles.hero}>
         <h1 className={styles.heroTitle}>StreamVault</h1>
         <p className={styles.heroSubtitle}>
-          {spotifyCatalogOn
-            ? 'Connect Audius to import metadata, search the public Spotify catalog for references, then upload audio + art to Arweave.'
-            : 'Connect Audius to import metadata, then upload audio + art to Arweave.'}
+          Connect Audius to import metadata, then upload audio + art to Arweave.
         </p>
         <div className={styles.heroCtas}>
           <div className={styles.audiusConnectCard}>
@@ -544,8 +539,6 @@ export function Home() {
           </>
         )}
       </section>
-
-      {spotifyCatalogOn && <HomeSpotifyCatalogSection />}
 
       {createOpen && (
         <CreateProfileModal

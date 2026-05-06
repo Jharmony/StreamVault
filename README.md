@@ -32,8 +32,6 @@ npm run dev
 
 Open `http://localhost:5173`.
 
-**Spotify catalog search** is **off by default** (no Home UI, no `/api/spotify-search` requests from the browser). To turn it on for a build, set **`VITE_SPOTIFY_CATALOG=1`**, add **`SPOTIFY_CLIENT_ID`** / **`SPOTIFY_CLIENT_SECRET`**, run **`npm run spotify:dev-api`** alongside **`npm run dev`** for local Vite, and see [docs/spotify-catalog-search.md](docs/spotify-catalog-search.md).
-
 ## Build (perma-app ready)
 
 ```bash
@@ -53,7 +51,7 @@ Output is in `dist/`. The app uses `base: './'` and **HashRouter** so it works w
 1. Push your repo to GitHub (e.g. `https://github.com/Jharmony/StreamVault`).
 2. Go to [vercel.com](https://vercel.com) → **Add New Project** → **Import** your GitHub repo.
 3. Leave defaults (Vite is auto-detected; build: `npm run build`, output: `dist`). Or use the included `vercel.json`.
-4. Add environment variables if needed (e.g. `VITE_AUDIUS_API_KEY`, `VITE_AO`) in **Project → Settings → Environment Variables**. Spotify catalog search is optional: set **`VITE_SPOTIFY_CATALOG=1`** plus **`SPOTIFY_CLIENT_ID`** / **`SPOTIFY_CLIENT_SECRET`** only if you want that feature.
+4. Add environment variables if needed (e.g. `VITE_AUDIUS_API_KEY`, `VITE_AO`) in **Project → Settings → Environment Variables**.
 5. **Deploy**. Your site will be at `https://your-project.vercel.app`. Production deploys run on every push to `main` (or the branch you set as Production).
 
 ## Deploy to Arweave (perma-app)
@@ -80,10 +78,11 @@ Output is in `dist/`. The app uses `base: './'` and **HashRouter** so it works w
 ## Environment
 
 - `VITE_AUDIUS_APP_NAME` — Optional app name for Audius API
+- `VITE_AUDIUS_BEARER_TOKEN` — Optional legacy bearer for unauthenticated Audius reads (prefer Log in with Audius + `VITE_AUDIUS_API_KEY` for imports)
+- `VITE_AUDIUS_API_KEY` — From [Audius Developer Dashboard](https://audius.co/settings) → Manage Your Apps; required for **Log in with Audius** (OAuth) and metadata imports in the app
 - `VITE_AO` — Optional AO mode (`legacy` | `mainnet`) for permaweb-libs
+- `VITE_AO_*` — Optional overrides for MU, CU, gateway, GraphQL, scheduler, and process IDs (see `.env.example` for the full set used by `PermawebContext`)
 - `VITE_UDL_LICENSE_URI` — Optional UDL license document URI passed through on publish (see `publish.ts` / `PublishModal`)
-- `VITE_SPOTIFY_CATALOG` — Set to `1` to enable the optional Home Spotify catalog UI and client calls to `/api/spotify-search`. Omit for the default (Spotify off in the app).
-- `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` — **Server only** (no `VITE_` prefix). Required only when catalog search is enabled; used by `api/spotify-search` on Vercel and by `npm run spotify:dev-api` locally. See [docs/spotify-catalog-search.md](docs/spotify-catalog-search.md).
 
 ## Architecture notes
 
