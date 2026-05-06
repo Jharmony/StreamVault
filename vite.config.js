@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 /**
@@ -25,32 +25,45 @@ function rpcWebsocketsShimPlugin() {
         },
     };
 }
-export default defineConfig({
-    plugins: [react(), nodePolyfills(), rpcWebsocketsShimPlugin()],
-    base: './',
-    server: {
-        allowedHosts: [
-            'clasp-manor-constrain.ngrok-free.dev',
-            '.ngrok-free.dev',
-        ],
-    },
-    optimizeDeps: {
-        exclude: ['rpc-websockets'],
-    },
-    build: {
-        outDir: 'dist',
-        sourcemap: false,
-        rollupOptions: {
-            output: {
-                manualChunks: undefined,
+export default defineConfig(function (_a) {
+    var mode = _a.mode;
+    var env = loadEnv(mode, process.cwd(), '');
+    var spotifyCatalog = env.VITE_SPOTIFY_CATALOG === '1';
+    return {
+        plugins: [react(), nodePolyfills(), rpcWebsocketsShimPlugin()],
+        base: './',
+        server: {
+            allowedHosts: [
+                'clasp-manor-constrain.ngrok-free.dev',
+                '.ngrok-free.dev',
+            ],
+            proxy: spotifyCatalog
+                ? {
+                    '/api/spotify-search': {
+                        target: 'http://127.0.0.1:8787',
+                        changeOrigin: true,
+                    },
+                }
+                : undefined,
+        },
+        optimizeDeps: {
+            exclude: ['rpc-websockets'],
+        },
+        build: {
+            outDir: 'dist',
+            sourcemap: false,
+            rollupOptions: {
+                output: {
+                    manualChunks: undefined,
+                },
             },
         },
-    },
-    resolve: {
-        alias: [
-            { find: '@', replacement: '/src' },
-            { find: 'rpc-websockets', replacement: '/src/shims/rpc-websockets.js' },
-            { find: 'rpc-websockets/dist/index.browser.cjs', replacement: '/src/shims/rpc-websockets.js' },
-        ],
-    },
+        resolve: {
+            alias: [
+                { find: '@', replacement: '/src' },
+                { find: 'rpc-websockets', replacement: '/src/shims/rpc-websockets.js' },
+                { find: 'rpc-websockets/dist/index.browser.cjs', replacement: '/src/shims/rpc-websockets.js' },
+            ],
+        },
+    };
 });
