@@ -8,7 +8,7 @@
 import type { Track } from '../context/PlayerContext';
 import type { RegisteredTrackRecord } from './aoMusicRegistry';
 import { searchTracksOnAO } from './aoMusicRegistry';
-import { arweaveGraphqlEndpoint, arweaveTxDataUrl } from './arweaveDataGateway';
+import { arweaveGraphqlEndpoint, arweaveTxDataUrl, turboTxDataUrl } from './arweaveDataGateway';
 import type { UploadedTrackRecord } from './uploadedTracks';
 const GQL_URL = (import.meta as any).env?.VITE_ARWEAVE_GQL_URL || arweaveGraphqlEndpoint();
 
@@ -45,6 +45,10 @@ function nodeToUploadedTrack(node: AudioTxNode): UploadedTrackRecord {
       : new Date(0).toISOString(),
     walletAddress: node.owner?.address,
     audiusTrackId: getTag(node, 'Audius-Track-Id'),
+    artworkTxId:
+      getTag(node, 'Artwork-Tx-Id') ||
+      getTag(node, 'Cover-Art-Tx-Id') ||
+      getTag(node, 'Thumbnail-Tx-Id'),
     contentType: getTag(node, 'Content-Type'),
     description: getTag(node, 'Description'),
     udl:
@@ -78,7 +82,8 @@ function nodeToTrack(node: AudioTxNode): Track {
     title: uploaded.title,
     artist: uploaded.artist,
     artistId: creator || uploaded.txId,
-    streamUrl: uploaded.permawebUrl,
+    artwork: uploaded.artworkTxId ? arweaveTxDataUrl(uploaded.artworkTxId) : undefined,
+    streamUrl: turboTxDataUrl(uploaded.txId),
     duration,
     isPermanent: true,
     permaTxId: uploaded.txId,
@@ -167,7 +172,7 @@ export function aoRecordsToTracks(records: RegisteredTrackRecord[]): Track[] {
     title: r.tags?.Title || 'Untitled',
     artist: r.tags?.Artist || r.creator?.slice(0, 8) + '…' || 'Unknown',
     artistId: r.creator,
-    streamUrl: arweaveTxDataUrl(r.audioTxId),
+    streamUrl: turboTxDataUrl(r.audioTxId),
     duration: undefined,
     isPermanent: true,
     permaTxId: r.audioTxId,

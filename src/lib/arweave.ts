@@ -43,6 +43,8 @@ export interface PublishResult {
   arioUrl?: string;
   confirmed?: boolean;
   gatewayReady?: boolean;
+  /** If artwork was uploaded as a separate tx, this links the audio to it. */
+  artworkTxId?: string;
   error?: string;
 }
 
