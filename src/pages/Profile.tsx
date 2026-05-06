@@ -38,11 +38,13 @@ import {
 } from '../lib/permaProfile';
 import { resolveProfileTokens, type ResolvedProfileToken } from '../lib/profileTokens';
 import { PublishModal } from '../components/PublishModal';
-import { arweaveTxDataUrl } from '../lib/arweaveDataGateway';
+import { arweaveTxDataUrl, turboTxDataUrl } from '../lib/arweaveDataGateway';
 import { readUploadLedger } from '../lib/uploadLedger';
 import {
   matchUploadedTrackToAudiusTrack,
+  mergeAudiusTrackWithPersistedUpload,
   normalizeUploadedTrackRecord,
+  uploadedTrackShareUrl,
   type UploadedTrackRecord,
 } from '../lib/uploadedTracks';
 import { useApi } from '@arweave-wallet-kit/react';
@@ -108,8 +110,8 @@ function uploadedSampleToTrack(sample: LocalSample): Track {
     title: sample.title,
     artist: sample.artist || 'Unknown artist',
     artistId: sample.walletAddress || sample.txId,
-    artwork: sample.artworkUrl,
-    streamUrl: sample.permawebUrl || sample.arioUrl || arweaveTxDataUrl(sample.txId),
+    artwork: sample.artworkTxId ? arweaveTxDataUrl(sample.artworkTxId) : sample.artworkUrl,
+    streamUrl: uploadedTrackShareUrl(sample),
     isPermanent: true,
     permaTxId: sample.txId,
     assetId: sample.assetId,
@@ -667,6 +669,7 @@ export function Profile() {
     for (const row of aoPublishedTracks) {
       const prev = byTx.get(row.audioTxId);
       byTx.set(row.audioTxId, {
+        ...prev,
         txId: row.audioTxId,
         title: row.tags?.Title || prev?.title || 'Untitled',
         artist: row.tags?.Artist || prev?.artist || '',
@@ -686,7 +689,6 @@ export function Profile() {
               uri: row.udl.uri,
             }
           : prev?.udl,
-        artworkUrl: prev?.artworkUrl,
       });
     }
     return Array.from(byTx.values()).sort(
@@ -1241,12 +1243,15 @@ export function Profile() {
                     {visibleAudiusTracks.map((track) => {
                       const playable = toPlayableTrack(track);
                       const matchedUpload = matchUploadedTrackToAudiusTrack(mergedProfileUploads, playable);
+                      const displayAudiusTrack = matchedUpload
+                        ? mergeAudiusTrackWithPersistedUpload(playable, matchedUpload)
+                        : playable;
                       return (
                         <TrackCard
                           key={track.id}
                           track={{
-                            ...playable,
-                            artwork: getArtworkUrl(track) || matchedUpload?.artworkUrl || playable.artwork,
+                            ...displayAudiusTrack,
+                            artwork: displayAudiusTrack.artwork || getArtworkUrl(track) || undefined,
                           }}
                           showPermanentBadge={false}
                           footerContent={
@@ -1344,7 +1349,7 @@ export function Profile() {
         <p className={styles.subtext}>
           Use the Art Engine in this repo to create unique layered artwork. Generate cover art in the browser (Creator tools), then use it when publishing to Arweave (Full — Cover image).
         </p>
-        <a href="#/creator-tools" className={styles.link}>
+        <a href="#/vault/creator-tools" className={styles.link}>
           Creator tools &amp; full steps →
         </a>
       </section>
@@ -1589,7 +1594,7 @@ export function Profile() {
           <p className={styles.subtext}>
             Full uploads stored on your permaweb profile zone. Use arweave.net (or a stored permaweb link) to open the data tx.
             You can also use these clips in the{' '}
-            <a href="#/creator-tools" className={styles.link}>Beat generator</a>.
+            <a href="#/vault/creator-tools" className={styles.link}>Beat generator</a>.
           </p>
           <div className={styles.trackGrid}>
             {profileArweaveTracks.map((sample) => (
@@ -1661,7 +1666,7 @@ export function Profile() {
                   title: t.tags?.Title || 'Untitled',
                   artist: t.tags?.Artist || 'Unknown artist',
                   artistId: t.creator,
-                  streamUrl: arweaveTxDataUrl(t.audioTxId),
+                  streamUrl: turboTxDataUrl(t.audioTxId),
                   isPermanent: true,
                   permaTxId: t.audioTxId,
                   assetId: t.assetId,

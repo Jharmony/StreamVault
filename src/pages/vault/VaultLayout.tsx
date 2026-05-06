@@ -107,6 +107,18 @@ function IconUpload({ className }: IconProps) {
   );
 }
 
+function IconTools({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <path
+        d="M14.7 6.2a4 4 0 0 0-5.4 5.4L4.5 16.4V19.5h3.1l4.8-4.8a4 4 0 0 0 5.4-5.4l-2.1 2.1-2.2-2.2 2.2-2.2Z"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function VaultLayout() {
   const { address, walletType } = useWallet();
   const { audiusUser, apiKeyConfigured } = useAudiusAuth();
@@ -123,6 +135,7 @@ export function VaultLayout() {
     { to: '/vault/wallet', end: false, label: 'Wallet', icon: IconWallet },
     { to: '/vault/rewards', end: false, label: 'Rewards', icon: IconRewards },
     { to: '/vault/playlists', end: false, label: 'Playlists', icon: IconPlaylists },
+    { to: '/vault/creator-tools', end: false, label: 'Creator tools', icon: IconTools },
   ];
 
   return (
