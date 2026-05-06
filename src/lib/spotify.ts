@@ -1,5 +1,10 @@
 /** Public catalog search types (Client Credentials / server-side search only). */
 
+/** Home catalog UI + `/api/spotify-search` calls only when `VITE_SPOTIFY_CATALOG=1` at build time. */
+export function isSpotifyCatalogEnabled(): boolean {
+  return import.meta.env.VITE_SPOTIFY_CATALOG === '1';
+}
+
 export type SpotifyImage = {
   url?: string;
   height?: number | null;

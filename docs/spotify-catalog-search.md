@@ -1,5 +1,9 @@
 # Spotify catalog search (no user OAuth)
 
+**Disabled by default.** The Home “Spotify catalog search” block and any browser calls to `/api/spotify-search` only run when **`VITE_SPOTIFY_CATALOG=1`** is set at build time (e.g. in `.env.local`). Without it, the client never requests that route.
+
+To use locally after enabling the flag: set `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`, run **`npm run spotify:dev-api`** in one terminal (listens on port 8787), then **`npm run dev`** in another — Vite only registers the dev proxy for `/api/spotify-search` when `VITE_SPOTIFY_CATALOG=1`.
+
 StreamVault uses Spotify’s **Client Credentials** flow on the **server only** (`SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET`). The browser calls same-origin `GET /api/spotify-search?q=…` and never sees the client secret.
 
 There is **no Spotify user login**, no PKCE, and no Premium requirement on the **app owner’s personal Spotify account** for this flow. Client Credentials grants access to **public catalog** endpoints (including search), not private user libraries.
@@ -13,6 +17,7 @@ There is **no Spotify user login**, no PKCE, and no Premium requirement on the *
 
 | Variable | Where |
 |----------|--------|
+| `VITE_SPOTIFY_CATALOG` | Set to `1` in `.env.local` / Vercel **build** env to ship the catalog UI and client fetches. Omit or leave unset to keep Spotify fully off in the app. |
 | `SPOTIFY_CLIENT_ID` | Vercel project env, or `.env.local` for local dev |
 | `SPOTIFY_CLIENT_SECRET` | Same (never `VITE_*`) |
 
