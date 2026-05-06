@@ -204,12 +204,18 @@ export async function fetchAudiusStreamAsBlob(
   return new Blob(chunks as BlobPart[], { type: contentType });
 }
 
+type SizedImage = { '150x150'?: string; '480x480'?: string; '1000x1000'?: string };
+
+function pickSizedImage(img?: SizedImage | string | null): string | null {
+  if (!img) return null;
+  if (typeof img === 'string') return img.trim() || null;
+  return img['1000x1000'] || img['480x480'] || img['150x150'] || null;
+}
+
 export function getArtworkUrl(track: AudiusTrack): string | null {
   return (
-    track.artwork?.['480x480'] ||
-    track.artwork?.['150x150'] ||
-    track.user.profile_picture?.['480x480'] ||
-    track.user.profile_picture?.['150x150'] ||
+    pickSizedImage(track.artwork) ||
+    pickSizedImage(track.user?.profile_picture) ||
     null
   );
 }

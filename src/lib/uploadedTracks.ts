@@ -22,6 +22,8 @@ export type UploadedTrackRecord = {
   dataTxOnly?: boolean;
   audiusTrackId?: string;
   description?: string;
+  /** Optional Arweave tx id for separately uploaded artwork (cover/thumbnail). */
+  artworkTxId?: string;
   artworkUrl?: string;
   contentType?: string;
   udl?: UploadedTrackUdlSummary;
@@ -149,6 +151,12 @@ export function normalizeUploadedTrackRecord(raw: unknown): UploadedTrackRecord 
     dataTxOnly: typeof row.dataTxOnly === 'boolean' ? row.dataTxOnly : undefined,
     audiusTrackId: pickString(row.audiusTrackId) || pickString(row['Audius-Track-Id']),
     description: pickString(row.description) || pickString(row.Description),
+    artworkTxId:
+      pickString(row.artworkTxId) ||
+      pickString(row.ArtworkTxId) ||
+      pickString(row['Artwork-Tx-Id']) ||
+      pickString(row['Cover-Art-Tx-Id']) ||
+      pickString(row['Thumbnail-Tx-Id']),
     artworkUrl: pickString(row.artworkUrl) || pickString(row.ArtworkUrl),
     contentType: pickString(row.contentType) || pickString(row['Content-Type']),
     udl: normalizedUdl,
@@ -156,8 +164,12 @@ export function normalizeUploadedTrackRecord(raw: unknown): UploadedTrackRecord 
   };
 }
 
+/**
+ * Playback URL for stored uploads. Prefer `arioUrl` (Turbo CDN / turbo-gateway) when present so
+ * fresh Turbo data items play before `arweave.net/{id}` finishes propagating.
+ */
 export function uploadedTrackShareUrl(track: Pick<UploadedTrackRecord, 'txId' | 'permawebUrl' | 'arioUrl'>): string {
-  return track.permawebUrl || track.arioUrl || arweaveTxDataUrl(track.txId);
+  return track.arioUrl || track.permawebUrl || arweaveTxDataUrl(track.txId);
 }
 
 function normalizeText(value: string | undefined): string {
@@ -186,16 +198,30 @@ export function matchUploadedTrackToAudiusTrack(
 }
 
 export function uploadedTrackToPlayerTrack(track: UploadedTrackRecord): Track {
+  const artwork = track.artworkTxId ? arweaveTxDataUrl(track.artworkTxId) : track.artworkUrl;
   return {
     id: track.txId,
     title: track.title,
     artist: track.artist || 'Unknown artist',
     artistId: track.walletAddress || track.txId,
-    artwork: track.artworkUrl,
+    artwork,
     streamUrl: uploadedTrackShareUrl(track),
     isPermanent: true,
     permaTxId: track.txId,
     assetId: track.assetId,
+  };
+}
+
+/** Keep the Audius track id for UI keys, but play from the persisted Arweave upload when present. */
+export function mergeAudiusTrackWithPersistedUpload(audiusTrack: Track, upload: UploadedTrackRecord): Track {
+  const p = uploadedTrackToPlayerTrack(upload);
+  return {
+    ...audiusTrack,
+    streamUrl: p.streamUrl,
+    artwork: p.artwork ?? audiusTrack.artwork,
+    isPermanent: true,
+    permaTxId: p.permaTxId,
+    assetId: p.assetId ?? audiusTrack.assetId,
   };
 }
 

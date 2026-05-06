@@ -24,6 +24,8 @@ import { CreateProfileModal } from '../components/CreateProfileModal';
 import { getSelectedOrLatestProfileByWallet } from '../lib/permaProfile';
 import { queryPermanentUploads } from '../lib/arweaveDiscovery';
 import { uploadedTrackToPlayerTrack, type UploadedTrackRecord } from '../lib/uploadedTracks';
+import { useAudiusAuth } from '../context/AudiusAuthContext';
+import { PublishModal } from '../components/PublishModal';
 
 function mapAudiusToTrack(a: AudiusTrack): Track {
   return {
@@ -40,6 +42,14 @@ function mapAudiusToTrack(a: AudiusTrack): Track {
 export function Home() {
   const { address, walletType } = useWallet();
   const { libs, isReady } = usePermaweb();
+  const {
+    audiusUser: connectedAudiusUser,
+    login: audiusLogin,
+    logout: audiusLogout,
+    apiKeyConfigured,
+    isLoggingIn: isAudiusLoggingIn,
+    authError: audiusAuthError,
+  } = useAudiusAuth();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [permanentTracks, setPermanentTracks] = useState<UploadedTrackRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,6 +68,7 @@ export function Home() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [hasPermaProfile, setHasPermaProfile] = useState(false);
+  const [publishOpen, setPublishOpen] = useState(false);
 
   const discoverTracks = useMemo(() => {
     const isFeedTestTrack = (title: string) => title.toLowerCase().includes('test');
@@ -310,10 +321,99 @@ export function Home() {
 
   return (
     <div className={styles.page}>
-      <section className={styles.audiusSection}>
+      <section className={styles.hero}>
+        <h1 className={styles.heroTitle}>StreamVault</h1>
+        <p className={styles.heroSubtitle}>
+          Connect Audius to import metadata, then upload audio + art to Arweave.
+        </p>
+        <div className={styles.heroCtas}>
+          <div className={styles.audiusConnectCard}>
+            <div className={styles.audiusConnectText}>
+              <strong>
+                {connectedAudiusUser ? `Audius connected — @${connectedAudiusUser.handle}` : 'Connect Audius'}
+              </strong>
+              <span>
+                {connectedAudiusUser
+                  ? 'Imports are ready.'
+                  : apiKeyConfigured
+                    ? 'Import tracks + cover art into StreamVault.'
+                    : 'Set VITE_AUDIUS_API_KEY to enable imports.'}
+              </span>
+            </div>
+            {connectedAudiusUser ? (
+              <button type="button" className={styles.heroSecondaryBtn} onClick={audiusLogout}>
+                Disconnect
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={styles.heroSecondaryBtn}
+                onClick={audiusLogin}
+                disabled={!apiKeyConfigured || isAudiusLoggingIn}
+                title={!apiKeyConfigured ? 'Missing VITE_AUDIUS_API_KEY' : undefined}
+              >
+                {isAudiusLoggingIn ? 'Connecting…' : 'Connect Audius'}
+              </button>
+            )}
+          </div>
+
+          <button type="button" className={styles.heroPrimaryBtn} onClick={() => setPublishOpen(true)}>
+            Upload to Arweave
+          </button>
+        </div>
+
+        {audiusAuthError && <p className={styles.errorText}>{audiusAuthError}</p>}
+      </section>
+
+      {loading || permanentLoading ? (
+        <LogoSpinner />
+      ) : (
+        <>
+          <section className={styles.grid}>
+            {discoverTracks.map((item) => (
+              <TrackCard
+                key={item.key}
+                track={item.track}
+                artistHref={
+                  item.kind === 'arweave' && item.upload?.walletAddress
+                    ? `/profile/${item.upload.walletAddress}`
+                    : undefined
+                }
+                showPermanentBadge={false}
+                footerContent={
+                  item.kind === 'arweave' && item.upload ? (
+                    <>
+                      <span className={styles.sourcePill}>Arweave</span>
+                      <UploadedTrackMeta track={item.upload} compact />
+                    </>
+                  ) : (
+                    <span className={styles.sourcePill}>Audius</span>
+                  )
+                }
+              />
+            ))}
+          </section>
+          <div className={styles.audiusCta} style={{ marginTop: '16px' }}>
+            <div>
+              <p className={styles.ctaTitle}>More from Discover</p>
+              <p className={styles.ctaCopy}>Load additional tracks from Audius trending.</p>
+            </div>
+            <button
+              type="button"
+              className={styles.ctaBtn}
+              onClick={() => setDiscoverLimit((n) => n + 24)}
+              disabled={discoverLoadingMore}
+            >
+              {discoverLoadingMore ? 'Loading more…' : 'Load more music'}
+            </button>
+          </div>
+        </>
+      )}
+
+      <section className={styles.audiusSection} style={{ marginTop: '32px' }}>
         <div className={styles.audiusHeader}>
           <div className={styles.audiusIntro}>
-            <h2 className={styles.sectionTitle}>Audius profiles</h2>
+            <h2 className={styles.sectionTitle}>Browse Audius</h2>
             <p className={styles.sectionSubtitle}>
               Load an artist profile, playlists, and tracks by handle or URL. Publishing is owner-only in Vault.
             </p>
@@ -357,11 +457,18 @@ export function Home() {
         )}
 
         {!hasPermaProfile && (
-          <div className={styles.audiusCta}>
-            <div>
-              <p className={styles.ctaTitle}>Bridge to permaweb</p>
+          <div className={styles.experimentalCta}>
+            <div className={styles.experimentalText}>
+              <div className={styles.experimentalTitleRow}>
+                <p className={styles.ctaTitle}>Bridge to permaweb</p>
+                <span className={styles.experimentalBadge}>Experimental</span>
+              </div>
               <p className={styles.ctaCopy}>
-                Create an Arweave profile to store your sound bites on-chain and link them to your Audius identity.
+                Create an Arweave profile/zone to link identity and store uploads on-chain. This flow depends on evolving
+                HyperBEAM + permaweb-libs behavior.
+              </p>
+              <p className={styles.ctaNote}>
+                Profile/zone features may be unstable until the HyperBEAM/permaweb-libs changes settle.
               </p>
               {walletType && walletType !== 'arweave' && (
                 <p className={styles.ctaNote}>
@@ -371,7 +478,7 @@ export function Home() {
             </div>
             <button
               type="button"
-              className={styles.ctaBtn}
+              className={styles.experimentalBtn}
               onClick={() => setCreateOpen(true)}
               disabled={walletType !== 'arweave'}
               title={walletType !== 'arweave' ? 'Connect Wander (Arweave) to create a profile' : undefined}
@@ -440,56 +547,12 @@ export function Home() {
           onCreate={handleCreateProfile}
         />
       )}
-      <section className={styles.hero}>
-        <h1 className={styles.heroTitle}>Discover</h1>
-        <p className={styles.heroSubtitle}>
-          Stream from Audius and permanent releases on Arweave.
-        </p>
-      </section>
 
-      {loading || permanentLoading ? (
-        <LogoSpinner />
-      ) : (
-        <>
-          <section className={styles.grid}>
-            {discoverTracks.map((item) => (
-              <TrackCard
-                key={item.key}
-                track={item.track}
-                artistHref={
-                  item.kind === 'arweave' && item.upload?.walletAddress
-                    ? `/profile/${item.upload.walletAddress}`
-                    : undefined
-                }
-                showPermanentBadge={false}
-                footerContent={
-                  item.kind === 'arweave' && item.upload ? (
-                    <>
-                      <span className={styles.sourcePill}>Arweave</span>
-                      <UploadedTrackMeta track={item.upload} compact />
-                    </>
-                  ) : (
-                    <span className={styles.sourcePill}>Audius</span>
-                  )
-                }
-              />
-            ))}
-          </section>
-          <div className={styles.audiusCta} style={{ marginTop: '16px' }}>
-            <div>
-              <p className={styles.ctaTitle}>More from Discover</p>
-              <p className={styles.ctaCopy}>Load additional tracks from Audius trending.</p>
-            </div>
-            <button
-              type="button"
-              className={styles.ctaBtn}
-              onClick={() => setDiscoverLimit((n) => n + 24)}
-              disabled={discoverLoadingMore}
-            >
-              {discoverLoadingMore ? 'Loading more…' : 'Load more music'}
-            </button>
-          </div>
-        </>
+      {publishOpen && (
+        <PublishModal
+          onClose={() => setPublishOpen(false)}
+          onSuccess={() => setPublishOpen(false)}
+        />
       )}
     </div>
   );

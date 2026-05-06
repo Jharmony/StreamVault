@@ -20,9 +20,12 @@ import {
 } from '../../lib/audius';
 import { PublishModal } from '../../components/PublishModal';
 import { readUploadLedger } from '../../lib/uploadLedger';
+import { arweaveTxDataUrl } from '../../lib/arweaveDataGateway';
 import {
   matchUploadedTrackToAudiusTrack,
+  mergeAudiusTrackWithPersistedUpload,
   normalizeUploadedTrackRecord,
+  uploadedTrackShareUrl,
   uploadedTrackToPlayerTrack,
   type UploadedTrackRecord,
 } from '../../lib/uploadedTracks';
@@ -275,10 +278,11 @@ export function VaultLibrary() {
                   <section className={styles.grid}>
                     {audiusTracks.map((track) => {
                       const matchedUpload = matchUploadedTrackToAudiusTrack(uploadedTracks, track);
+                      const trackForCard = matchedUpload ? mergeAudiusTrackWithPersistedUpload(track, matchedUpload) : track;
                       return (
                         <TrackCard
                           key={track.id}
-                          track={track}
+                          track={trackForCard}
                           onPublishClick={matchedUpload ? undefined : () => setPublishTrack(track)}
                           showPermanentBadge={false}
                           footerContent={
@@ -355,7 +359,10 @@ export function VaultLibrary() {
                   const displayTrack = uploaded
                     ? {
                         ...track,
-                        artwork: uploaded.artworkUrl || track.artwork,
+                        streamUrl: uploadedTrackShareUrl(uploaded),
+                        artwork: uploaded.artworkTxId
+                          ? arweaveTxDataUrl(uploaded.artworkTxId)
+                          : uploaded.artworkUrl || track.artwork,
                       }
                     : track;
                   return (
