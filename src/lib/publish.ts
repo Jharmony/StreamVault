@@ -16,6 +16,7 @@ import {
   arweaveTxDataUrl,
   arweaveTxDataUrls,
   arweaveTxStatusUrls,
+  turboTxDataUrl,
 } from './arweaveDataGateway';
 import type { UdlConfig, RoyaltySplit } from './udl';
 import { udlConfigToTags } from './udl';
@@ -55,6 +56,9 @@ const ANS110_TYPE_MUSIC = 'music';
 /** ANS-110 `Type` for cover artwork. */
 const ANS110_TYPE_IMAGE = 'image';
 
+/** Stable tag used to link an audio tx back to a separately uploaded cover artwork tx. */
+export const STREAMVAULT_ARTWORK_TX_TAG = 'Artwork-Tx-Id';
+
 function ans110Title(s: string): string {
   const t = nfc(s).trim();
   if (t.length <= ANS110_MAX_TITLE) return t;
@@ -81,6 +85,7 @@ interface TurboUploadOptions {
   file: Blob | File;
   tags: { name: string; value: string }[];
   paymentToken: TurboPaymentToken;
+  onProgress?: (progress: { processedBytes: number; totalBytes: number }) => void;
 }
 
 function describePublishError(error: unknown, context?: { useTurbo?: boolean; fromAudiusStream?: boolean }): string {
@@ -106,22 +111,31 @@ function describePublishError(error: unknown, context?: { useTurbo?: boolean; fr
   return raw;
 }
 
+/** Phantom and other Solana wallets often expose the adapter on `window.solana` and/or `window.phantom.solana`. */
+function getBrowserSolanaWalletAdapter(win: Window | null): any {
+  if (!win) return null;
+  const w = win as any;
+  return w.solana ?? w.phantom?.solana ?? null;
+}
+
 async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
-  const win = typeof window !== 'undefined' ? (window as any) : null;
+  const win = typeof window !== 'undefined' ? window : null;
   const { TurboFactory, ArconnectSigner } = await import('@ardrive/turbo-sdk/web');
 
   let turbo;
   if (args.paymentToken === 'arweave') {
-    const wallet = win?.arweaveWallet;
+    const wallet = (win as any)?.arweaveWallet;
     if (!wallet) throw new Error('Wander wallet required for Turbo upload.');
     const signer = new ArconnectSigner(wallet);
     turbo = TurboFactory.authenticated({ signer });
   } else if (args.paymentToken === 'solana') {
-    const walletAdapter = win?.solana;
-    if (!walletAdapter) throw new Error('Solana wallet required for Turbo upload.');
+    const walletAdapter = getBrowserSolanaWalletAdapter(win);
+    if (!walletAdapter?.signTransaction) {
+      throw new Error('Solana wallet required for Turbo upload. Connect Phantom (or another injected Solana wallet).');
+    }
     turbo = TurboFactory.authenticated({ walletAdapter, token: 'solana' });
   } else {
-    const provider = win?.ethereum;
+    const provider = (win as any)?.ethereum;
     if (!provider) throw new Error('Ethereum wallet required for Turbo upload.');
     const { BrowserProvider } = await import('ethers');
     const { InjectedEthereumSigner } = await import('@dha-team/arbundles');
@@ -144,6 +158,7 @@ async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
     events: {
       onUploadProgress: ({ totalBytes, processedBytes }) => {
         console.info('[turbo] Upload progress', { totalBytes, processedBytes });
+        args.onProgress?.({ totalBytes, processedBytes });
       },
       onUploadError: (error) => {
         console.error('[turbo] Upload error', error);
@@ -155,6 +170,39 @@ async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
   });
 
   return result.id;
+}
+
+/** Cover image via Turbo (same path as Turbo audio) so the id is discoverable on gateways together with bundled uploads. */
+async function uploadArtworkWithTurbo(args: {
+  artwork: Blob;
+  title?: string;
+  artist?: string;
+  paymentToken: TurboPaymentToken;
+  onProgress?: (progress: { processedBytes: number; totalBytes: number }) => void;
+}): Promise<{ txId: string; permawebUrl: string; confirmed: boolean; gatewayReady: boolean; contentType: string }> {
+  const contentType = args.artwork.type || 'image/jpeg';
+  const tags: { name: string; value: string }[] = [
+    { name: 'App-Name', value: 'StreamVault' },
+    { name: 'Type', value: ANS110_TYPE_IMAGE },
+    { name: 'Content-Type', value: contentType },
+  ];
+  if (args.title) tags.push({ name: 'Title', value: ans110Title(args.title) });
+  if (args.artist) tags.push({ name: 'Artist', value: nfc(args.artist) });
+
+  const txId = await uploadWithTurbo({
+    file: args.artwork,
+    tags: dedupeArweaveTags(tags),
+    paymentToken: args.paymentToken,
+    onProgress: args.onProgress,
+  });
+  const gatewayReady = await waitForGatewayImageReady(txId, contentType, 120_000).catch(() => false);
+  return {
+    txId,
+    permawebUrl: arweaveTxDataUrl(txId),
+    confirmed: true,
+    gatewayReady,
+    contentType,
+  };
 }
 
 /**
@@ -313,6 +361,82 @@ async function waitForGatewayAudioReady(
   return false;
 }
 
+async function isGatewayImageReady(txId: string, expectedContentType?: string): Promise<boolean> {
+  for (const url of arweaveTxDataUrls(txId)) {
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { Range: 'bytes=0-1' },
+        cache: 'no-store',
+      });
+      if (!(res.status === 200 || res.status === 206)) continue;
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      if (expectedContentType && contentType && !contentType.includes(expectedContentType.toLowerCase().split(';')[0])) {
+        continue;
+      }
+      if (contentType.startsWith('image/')) {
+        return true;
+      }
+    } catch {
+      // ignore and try next gateway
+    }
+  }
+  return false;
+}
+
+async function waitForGatewayImageReady(
+  txId: string,
+  expectedContentType?: string,
+  timeoutMs = 120_000
+): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const ready = await isGatewayImageReady(txId, expectedContentType);
+    if (ready) return true;
+    await new Promise((r) => setTimeout(r, 3_000));
+  }
+  return false;
+}
+
+function inferContentTypeFromUrl(url: string): string | null {
+  const lower = url.toLowerCase().split('?')[0].split('#')[0];
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  return null;
+}
+
+async function fetchArtworkAsBlob(url: string): Promise<{ blob: Blob; contentType: string }> {
+  const res = await fetch(url, { mode: 'cors', credentials: 'omit', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Artwork fetch failed (${res.status})`);
+  const headerType = (res.headers.get('content-type') || '').split(';')[0].trim();
+  const inferred = inferContentTypeFromUrl(url);
+  const contentType = headerType || inferred || 'image/jpeg';
+  const buf = await res.arrayBuffer();
+  return { blob: new Blob([buf], { type: contentType }), contentType };
+}
+
+async function uploadArtworkTx(args: {
+  artwork: Blob;
+  title?: string;
+  artist?: string;
+}): Promise<{ txId: string; permawebUrl: string; confirmed: boolean; gatewayReady: boolean; contentType: string }> {
+  const contentType = args.artwork.type || 'image/jpeg';
+  const tags: { name: string; value: string }[] = [
+    { name: 'App-Name', value: 'StreamVault' },
+    { name: 'Type', value: ANS110_TYPE_IMAGE },
+  ];
+  if (args.title) tags.push({ name: 'Title', value: ans110Title(args.title) });
+  if (args.artist) tags.push({ name: 'Artist', value: nfc(args.artist) });
+  tags.push({ name: 'Content-Type', value: contentType });
+
+  const txId = await uploadDataTx(await args.artwork.arrayBuffer(), contentType, dedupeArweaveTags(tags));
+  const confirmed = await waitForConfirmation(txId, 120_000).catch(() => false);
+  const gatewayReady = await waitForGatewayImageReady(txId, contentType, 120_000).catch(() => false);
+  return { txId, permawebUrl: arweaveTxDataUrl(txId), confirmed, gatewayReady, contentType };
+}
+
 /** Publish sample blob to Arweave as data tx; return permaweb link. */
 export async function publishSampleToArweave(
   args: {
@@ -323,9 +447,14 @@ export async function publishSampleToArweave(
     udl?: UdlConfig;
     splits?: RoyaltySplit[];
     audiusTrackId?: string;
+  },
+  opts?: {
+    onStage?: (stage: 'preparing' | 'uploading-audio' | 'confirming' | 'waiting-gateway' | 'done' | 'error') => void;
+    onTxId?: (txId: string) => void;
   }
 ): Promise<PublishResult> {
   try {
+    opts?.onStage?.('preparing');
     console.info('[publish] Sample publish started', { title: args.title, artist: args.artist });
     const data = await args.sample.arrayBuffer();
     const tags: { name: string; value: string }[] = [
@@ -345,14 +474,20 @@ export async function publishSampleToArweave(
     if (args.splits && args.splits.length > 0) {
       tags.push({ name: 'Royalties-Splits', value: JSON.stringify(args.splits) });
     }
+    opts?.onStage?.('uploading-audio');
     const txId = await uploadDataTx(data, args.sample.type || 'audio/mpeg', dedupeArweaveTags(tags));
+    opts?.onTxId?.(txId);
+    opts?.onStage?.('confirming');
     const confirmed = await waitForConfirmation(txId).catch(() => false);
+    opts?.onStage?.('waiting-gateway');
     const gatewayReady = await waitForGatewayAudioReady(txId, args.sample.type || 'audio/mpeg', 60_000).catch(() => false);
     const permawebUrl = arweaveTxDataUrl(txId);
     console.info('[publish] Sample publish complete', { txId, permawebUrl });
-    return { success: true, txId, permawebUrl, arioUrl: arweaveTxDataUrls(txId)[1], confirmed, gatewayReady };
+    opts?.onStage?.('done');
+    return { success: true, txId, permawebUrl, arioUrl: turboTxDataUrl(txId), confirmed, gatewayReady };
   } catch (e: any) {
     console.error('[publish] Sample publish failed', e);
+    opts?.onStage?.('error');
     return { success: false, error: e?.message || 'Sample upload failed' };
   }
 }
@@ -377,26 +512,86 @@ export async function publishFullAsAtomicAsset(
     fromAudiusStream?: boolean;
   },
   creatorAddress: string,
-  ctx: { libs: PermawebLibs | null }
+  ctx: { libs: PermawebLibs | null },
+  opts?: {
+    onStage?: (stage:
+      | 'preparing'
+      | 'uploading-cover'
+      | 'uploading-audio'
+      | 'confirming'
+      | 'waiting-gateway'
+      | 'creating-atomic-asset'
+      | 'registering-ao'
+      | 'done'
+      | 'error'
+    ) => void;
+    onProgress?: (progress: {
+      kind: 'cover' | 'audio';
+      processedBytes: number;
+      totalBytes: number;
+    }) => void;
+    onTxId?: (txId: string) => void;
+    onArtworkTxId?: (txId: string) => void;
+  }
 ): Promise<PublishResult> {
   const libs = ctx.libs;
   if (!args.skipAtomicAsset && !libs?.createAtomicAsset) {
-    return { success: false, error: 'Atomic asset creation not available. Try “Skip atomic asset” to upload audio + UDL tags only.' };
+    return { success: false, error: 'Atomic asset creation not available. Turn off “Create atomic asset (experimental)” to upload audio + UDL tags only.' };
   }
 
   try {
+    opts?.onStage?.('preparing');
     const title = ans110Title(args.title);
     const artist = nfc(args.artist);
     console.info('[publish] Full asset publish started', { title, artist });
     const udl = args.udl;
     const splits = args.splits;
     let artworkUrlToUse = args.artworkUrl;
+    let artworkTxId: string | undefined;
+
+    const turboToken = args.turboPaymentToken || 'arweave';
     if (args.artworkFile) {
-      console.info('[publish] Uploading cover image to Arweave');
-      artworkUrlToUse = await uploadImageTx(args.artworkFile, [
-        { name: 'Title', value: title },
-        { name: 'Artist', value: artist },
-      ]);
+      opts?.onStage?.('uploading-cover');
+      console.info('[publish] Uploading cover image', { turbo: !!args.useTurbo });
+      const uploaded = args.useTurbo
+        ? await uploadArtworkWithTurbo({
+            artwork: args.artworkFile,
+            title,
+            artist,
+            paymentToken: turboToken,
+            onProgress: (p) => opts?.onProgress?.({ kind: 'cover', ...p }),
+          })
+        : await uploadArtworkTx({ artwork: args.artworkFile, title, artist });
+      artworkTxId = uploaded.txId;
+      opts?.onArtworkTxId?.(uploaded.txId);
+      artworkUrlToUse = uploaded.permawebUrl;
+      if (!uploaded.confirmed || !uploaded.gatewayReady) {
+        console.info('[publish] Artwork uploaded but still propagating', uploaded);
+      }
+    } else if (typeof args.artworkUrl === 'string' && args.artworkUrl.trim()) {
+      // Audius artwork URLs generally allow CORS, but if it fails we fall back to using the remote URL.
+      try {
+        opts?.onStage?.('uploading-cover');
+        console.info('[publish] Uploading cover image (remote URL)', { turbo: !!args.useTurbo });
+        const { blob } = await fetchArtworkAsBlob(args.artworkUrl);
+        const uploaded = args.useTurbo
+          ? await uploadArtworkWithTurbo({
+              artwork: blob,
+              title,
+              artist,
+              paymentToken: turboToken,
+              onProgress: (p) => opts?.onProgress?.({ kind: 'cover', ...p }),
+            })
+          : await uploadArtworkTx({ artwork: blob, title, artist });
+        artworkTxId = uploaded.txId;
+        opts?.onArtworkTxId?.(uploaded.txId);
+        artworkUrlToUse = uploaded.permawebUrl;
+        if (!uploaded.confirmed || !uploaded.gatewayReady) {
+          console.info('[publish] Artwork uploaded but still propagating', uploaded);
+        }
+      } catch (e) {
+        console.warn('[publish] Could not fetch/upload artwork URL; keeping original artworkUrl', e);
+      }
     }
     let txId: string;
     let usedTurboUpload = false;
@@ -408,6 +603,9 @@ export async function publishFullAsAtomicAsset(
       { name: 'Artist', value: artist },
       { name: 'Creator', value: creatorAddress },
     ];
+    if (artworkTxId) {
+      baseTags.push({ name: STREAMVAULT_ARTWORK_TX_TAG, value: artworkTxId });
+    }
     if (args.audiusTrackId) {
       baseTags.push({ name: 'Audius-Track-Id', value: args.audiusTrackId });
     }
@@ -431,11 +629,14 @@ export async function publishFullAsAtomicAsset(
 
     if (args.useTurbo) {
       try {
+        opts?.onStage?.('uploading-audio');
         txId = await uploadWithTurbo({
           file: args.audio,
           tags: dedupeArweaveTags(baseTags),
           paymentToken: args.turboPaymentToken || 'arweave',
+          onProgress: (p) => opts?.onProgress?.({ kind: 'audio', ...p }),
         });
+        opts?.onTxId?.(txId);
         usedTurboUpload = true;
       } catch (e: any) {
         const msg = String(e?.message || e || '');
@@ -446,17 +647,20 @@ export async function publishFullAsAtomicAsset(
           msg.includes('Website is offline');
         if (isGatewayIssue && args.audio.size <= 10 * 1024 * 1024) {
           // Fallback: try direct Arweave upload so creators can still publish when Turbo is down.
+          opts?.onStage?.('uploading-audio');
           const data = await args.audio.arrayBuffer();
           txId = await uploadDataTx(
             data,
             args.audio.type || 'audio/mpeg',
             dedupeArweaveTags(baseTags)
           );
+          opts?.onTxId?.(txId);
         } else {
           throw e;
         }
       }
     } else {
+      opts?.onStage?.('uploading-audio');
       const data = await args.audio.arrayBuffer();
       if (data.byteLength > 10 * 1024 * 1024) return { success: false, error: 'File too large (max ~10MB).' };
 
@@ -465,6 +669,7 @@ export async function publishFullAsAtomicAsset(
         args.audio.type || 'audio/mpeg',
         dedupeArweaveTags(baseTags)
       );
+      opts?.onTxId?.(txId);
     }
     let confirmed = false;
     if (usedTurboUpload) {
@@ -474,6 +679,7 @@ export async function publishFullAsAtomicAsset(
       confirmed = true;
       console.info('[publish] Turbo upload accepted; skipping raw tx status polling', { txId });
     } else {
+      opts?.onStage?.('confirming');
       console.info('[publish] Waiting for L1 confirmation (GraphQL discovery is usually post-confirmation)', {
         txId,
         confirmTimeoutMs,
@@ -488,6 +694,7 @@ export async function publishFullAsAtomicAsset(
       txId,
       gatewayReadyTimeoutMs,
     });
+    opts?.onStage?.('waiting-gateway');
     const gatewayReady = await waitForGatewayAudioReady(
       txId,
       args.audio.type || 'audio/mpeg',
@@ -497,6 +704,7 @@ export async function publishFullAsAtomicAsset(
 
     if (args.skipAtomicAsset) {
       try {
+        opts?.onStage?.('registering-ao');
         await registerTrackOnAO({
           assetId: txId,
           audioTxId: txId,
@@ -512,14 +720,16 @@ export async function publishFullAsAtomicAsset(
       } catch (e) {
         console.warn('[publish] Failed to register data-tx track on AO', e);
       }
+      opts?.onStage?.('done');
       return {
         success: true,
         txId,
         assetId: undefined,
         permawebUrl,
-        arioUrl: arweaveTxDataUrls(txId)[1],
+        arioUrl: turboTxDataUrl(txId),
         confirmed,
         gatewayReady,
+        artworkTxId,
       };
     }
 
@@ -531,11 +741,13 @@ export async function publishFullAsAtomicAsset(
       audioTxId: txId,
       artist,
       artwork: artworkUrlToUse || undefined,
+      artworkTxId: artworkTxId || undefined,
       royaltiesBps: args.royaltiesBps ?? undefined,
     };
     if (udl) metadata.udl = udl;
     if (splits && splits.length > 0) metadata.splits = splits;
 
+    opts?.onStage?.('creating-atomic-asset');
     const assetTags: { name: string; value: string }[] = [
       { name: 'App-Name', value: 'StreamVault' },
       { name: 'Type', value: ANS110_TYPE_MUSIC },
@@ -544,6 +756,9 @@ export async function publishFullAsAtomicAsset(
       { name: 'Artist', value: artist },
       { name: 'Creator', value: creatorAddress },
     ];
+    if (artworkTxId) {
+      assetTags.push({ name: STREAMVAULT_ARTWORK_TX_TAG, value: artworkTxId });
+    }
 
     if (udl) {
       assetTags.push(...udlConfigToTags(udl));
@@ -569,6 +784,7 @@ export async function publishFullAsAtomicAsset(
 
     // Best-effort AO registration for discovery and royalty engine usage.
     try {
+      opts?.onStage?.('registering-ao');
       await registerTrackOnAO({
         assetId,
         audioTxId: txId,
@@ -583,17 +799,20 @@ export async function publishFullAsAtomicAsset(
     } catch (e) {
       console.warn('[publish] Failed to register track on AO MusicRegistry', e);
     }
+    opts?.onStage?.('done');
     return {
       success: true,
       txId,
       assetId,
       permawebUrl,
-      arioUrl: arweaveTxDataUrls(txId)[1],
+      arioUrl: turboTxDataUrl(txId),
       confirmed,
       gatewayReady,
+      artworkTxId,
     };
   } catch (e: any) {
     console.error('[publish] Full asset publish failed', e);
+    opts?.onStage?.('error');
     return {
       success: false,
       error: describePublishError(e, {
