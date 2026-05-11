@@ -118,6 +118,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [turboTopUpLoading, setTurboTopUpLoading] = React.useState(false);
   const [arBalance, setArBalance] = React.useState<string | null>(null);
   const [arBalanceLoading, setArBalanceLoading] = React.useState(false);
+  const [isOffline, setIsOffline] = React.useState(
+    () => typeof navigator !== 'undefined' && !navigator.onLine
+  );
   const connectPollIntervalRef = React.useRef<number | null>(null);
   const connectPollTimeoutRef = React.useRef<number | null>(null);
   const lastTrackedAddressRef = React.useRef<string | null>(null);
@@ -155,6 +158,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
     if (cachedProfileId) return `/profile/${cachedProfileId}`;
     return '/';
   }, [address, cachedProfileId, normalizedProfile?.id]);
+
+  React.useEffect(() => {
+    const sync = () => setIsOffline(!navigator.onLine);
+    window.addEventListener('online', sync);
+    window.addEventListener('offline', sync);
+    return () => {
+      window.removeEventListener('online', sync);
+      window.removeEventListener('offline', sync);
+    };
+  }, []);
 
   React.useEffect(() => {
     if (address) {
@@ -737,6 +750,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className={styles.layout}>
+      {isOffline && (
+        <div className={styles.offlineBanner} role="status" aria-live="polite">
+          You&apos;re offline — the shell may load from cache; streaming and uploads need a connection.
+        </div>
+      )}
       <header className={styles.header}>
         <div className={styles.headerInner}>
           <button
