@@ -19,6 +19,7 @@ import { fetchTurboBalance, formatTurboCredits, type TurboBalance } from '../lib
 import { ensureWanderConnect, openWanderConnect } from '../lib/wanderConnect';
 import { ConnectButton } from '@arweave-wallet-kit/react';
 import { setUserProperties, trackEvent } from '../lib/analytics';
+import { publicAsset } from '../lib/publicAsset';
 import styles from './Layout.module.css';
 
 const ARWEAVE_PERMISSIONS = ['ACCESS_ADDRESS', 'ACCESS_PUBLIC_KEY', 'SIGN_TRANSACTION', 'SIGNATURE', 'DISPATCH'];
@@ -117,6 +118,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [turboTopUpLoading, setTurboTopUpLoading] = React.useState(false);
   const [arBalance, setArBalance] = React.useState<string | null>(null);
   const [arBalanceLoading, setArBalanceLoading] = React.useState(false);
+  const [isOffline, setIsOffline] = React.useState(
+    () => typeof navigator !== 'undefined' && !navigator.onLine
+  );
   const connectPollIntervalRef = React.useRef<number | null>(null);
   const connectPollTimeoutRef = React.useRef<number | null>(null);
   const lastTrackedAddressRef = React.useRef<string | null>(null);
@@ -154,6 +158,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
     if (cachedProfileId) return `/profile/${cachedProfileId}`;
     return '/';
   }, [address, cachedProfileId, normalizedProfile?.id]);
+
+  React.useEffect(() => {
+    const sync = () => setIsOffline(!navigator.onLine);
+    window.addEventListener('online', sync);
+    window.addEventListener('offline', sync);
+    return () => {
+      window.removeEventListener('online', sync);
+      window.removeEventListener('offline', sync);
+    };
+  }, []);
 
   React.useEffect(() => {
     if (address) {
@@ -736,6 +750,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className={styles.layout}>
+      {isOffline && (
+        <div className={styles.offlineBanner} role="status" aria-live="polite">
+          You&apos;re offline — the shell may load from cache; streaming and uploads need a connection.
+        </div>
+      )}
       <header className={styles.header}>
         <div className={styles.headerInner}>
           <button
@@ -751,7 +770,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </button>
           <Link to="/" className={styles.logo}>
             <img
-              src="/streamvault-logo.png"
+              src={publicAsset('streamvault-logo.png')}
               alt="StreamVault"
               className={styles.logoMark}
             />
