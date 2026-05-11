@@ -40,6 +40,8 @@ npm run build
 
 Output is in `dist/`. The app uses `base: './'` and **HashRouter** so it works when deployed to a static host or Arweave.
 
+**PWA / offline:** Production builds register a Workbox service worker (`vite-plugin-pwa`) that precaches the app shell (HTML + hashed JS/CSS). Same-origin static assets can be refreshed in the background; Audius, gateways, and wallet traffic are not blanket-cached. After changing `public/manifest.webmanifest`, bump the `?v=` query on the manifest `<link>` in `index.html` if clients cache the old manifest aggressively.
+
 ## Branch workflow & going live
 
 - **`main`** — production; what's live. Deploy from here (e.g. Vercel production).

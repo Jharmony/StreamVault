@@ -1,6 +1,13 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
+import { VitePWA } from 'vite-plugin-pwa';
+
+/**
+ * PWA (vite-plugin-pwa): precaches the built app shell (HTML + hashed JS/CSS) so the UI loads offline.
+ * Runtime cache is same-origin GET only (/assets/* hashed bundles + listed public PNGs) — no Audius/Arweave/Turbo
+ * URLs, so wallet/OAuth flows are not served stale opaque third-party responses.
+ */
 
 /**
  * Vite plugin that provides a synthetic module for rpc-websockets.
@@ -42,7 +49,59 @@ export default WSClient;
 }
 
 export default defineConfig({
-  plugins: [react(), nodePolyfills(), rpcWebsocketsShimPlugin()],
+  plugins: [
+    react(),
+    nodePolyfills(),
+    rpcWebsocketsShimPlugin(),
+    VitePWA({
+      registerType: 'prompt',
+      injectRegister: 'auto',
+      manifest: false,
+      devOptions: { enabled: false },
+      includeAssets: [
+        'manifest.webmanifest',
+        'favicon.png',
+        'streamvault-logo.png',
+        'pwa-icon-192.png',
+        'pwa-icon-512.png',
+        'pwa-icon-192-maskable.png',
+        'pwa-icon-512-maskable.png',
+      ],
+      includeManifestIcons: false,
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico}'],
+        globIgnores: ['**/*.map'],
+        /** App bundles exceed Workbox’s default 2 MiB; precache full shell for offline. */
+        maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
+        navigateFallback: 'index.html',
+        runtimeCaching: [
+          {
+            urlPattern: ({ request, url }) => {
+              if (request.method !== 'GET') return false;
+              if (url.origin !== self.location.origin) return false;
+              const p = url.pathname;
+              if (p.includes('/assets/') && /\.(js|css|woff2?)$/i.test(p)) return true;
+              if (
+                /\.(png|webp)$/i.test(p) &&
+                (/\/pwa-icon-/.test(p) ||
+                  /\/streamvault-logo\.png$/i.test(p) ||
+                  /\/favicon\.png$/i.test(p))
+              ) {
+                return true;
+              }
+              return false;
+            },
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'sv-same-origin-static',
+              expiration: { maxEntries: 64, maxAgeSeconds: 7 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+        ],
+      },
+    }),
+  ],
   base: './',
   server: {
     allowedHosts: [
