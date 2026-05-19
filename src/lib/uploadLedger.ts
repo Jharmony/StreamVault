@@ -1,3 +1,4 @@
+import { normalizeArweaveTxId } from './arweaveDataGateway';
 import { normalizeUploadedTrackRecord, type UploadedTrackRecord } from './uploadedTracks';
 
 /**
@@ -30,6 +31,26 @@ export function appendUploadLedger(entry: UploadLedgerEntry): void {
     window.localStorage.setItem(LEDGER_KEY, JSON.stringify(next));
   } catch (e) {
     console.warn('[uploadLedger] append failed', e);
+  }
+}
+
+/** Find a ledger entry by Arweave tx id (any wallet). */
+export function findUploadLedgerByTxId(txId: string): UploadLedgerEntry | null {
+  if (typeof window === 'undefined' || !txId.trim()) return null;
+  try {
+    const raw = window.localStorage.getItem(LEDGER_KEY);
+    const list = (raw ? JSON.parse(raw) : []) as UploadLedgerEntry[];
+    const normalizedTxId = normalizeArweaveTxId(txId);
+    const hit = list.find((e) => e?.txId && normalizeArweaveTxId(e.txId) === normalizedTxId);
+    if (!hit) return null;
+    const record = normalizeUploadedTrackRecord(hit);
+    if (!record) return null;
+    const walletAddress = typeof hit.walletAddress === 'string' ? hit.walletAddress : record.walletAddress;
+    return walletAddress
+      ? { ...record, walletAddress: normalizeAddr(walletAddress) }
+      : { ...record, walletAddress: '' };
+  } catch {
+    return null;
   }
 }
 
