@@ -116,6 +116,11 @@
   text-decoration: none;
 }
 
+.creatorMono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--text-sm);
+}
+
 .badges {
   display: flex;
   flex-wrap: wrap;

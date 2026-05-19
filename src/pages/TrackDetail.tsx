@@ -15,6 +15,7 @@ import {
   type ParsedTrackTags,
   type TxFieldRow,
 } from '../lib/arweaveTxDetail';
+import { arweaveArtistPath, looksLikeWalletAddress } from '../lib/arweaveArtist';
 import { findUploadLedgerByTxId } from '../lib/uploadLedger';
 import { uploadedTrackToPlayerTrack } from '../lib/uploadedTracks';
 import styles from './TrackDetail.module.css';
@@ -171,6 +172,13 @@ export function TrackDetail() {
 
   const description = sections.identity.find((r) => r.label === 'Description')?.value;
 
+  const creatorHref =
+    creator && looksLikeWalletAddress(creator)
+      ? arweaveArtistPath(creator)
+      : creator
+        ? `/profile/${creator}`
+        : undefined;
+
   return (
     <div className={styles.page}>
       <Link to="/" className={styles.backLink}>
@@ -199,14 +207,16 @@ export function TrackDetail() {
         <div className={styles.heroBody}>
           <h1 className={styles.title}>{title}</h1>
           <p className={styles.artist}>
-            {creator && creator !== artist ? (
+            {creatorHref && creator && creator !== artist ? (
               <>
-                {artist}
+                <Link to={creatorHref}>{artist}</Link>
                 {' · '}
-                <Link to={`/profile/${creator}`}>{creator.slice(0, 12)}…</Link>
+                <Link to={creatorHref} className={styles.creatorMono}>
+                  {creator.slice(0, 12)}…
+                </Link>
               </>
-            ) : creator ? (
-              <Link to={`/profile/${creator}`}>{artist}</Link>
+            ) : creatorHref ? (
+              <Link to={creatorHref}>{artist}</Link>
             ) : (
               artist
             )}

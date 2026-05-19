@@ -6,6 +6,7 @@ import {
   normalizeArweaveTxId,
   turboTxDataUrl,
 } from './arweaveDataGateway';
+import { arweaveArtistPath, looksLikeWalletAddress } from './arweaveArtist';
 
 export type ArweaveTag = { name: string; value: string };
 
@@ -152,7 +153,12 @@ export function parseTrackTagSections(tags: ArweaveTag[]): ParsedTrackTags {
 
   if (title) push(identity, 'Title', title);
   if (artist) push(identity, 'Artist', artist);
-  if (creator) push(identity, 'Creator', creator, { mono: true });
+  if (creator) {
+    push(identity, 'Creator', creator, {
+      mono: true,
+      href: looksLikeWalletAddress(creator) ? arweaveArtistPath(creator) : undefined,
+    });
+  }
   if (description) push(identity, 'Description', description);
   if (duration) push(identity, 'Duration', `${duration}s`);
 
@@ -416,7 +422,7 @@ export function explorerTransactionRows(
       label: 'From',
       value: tx.owner,
       mono: true,
-      href: `/profile/${tx.owner}`,
+      href: looksLikeWalletAddress(tx.owner) ? arweaveArtistPath(tx.owner) : `/profile/${tx.owner}`,
     });
   }
   if (tx?.rewardAr) {

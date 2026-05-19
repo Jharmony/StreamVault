@@ -1,3 +1,4 @@
+import { normalizeArweaveTxId } from './arweaveDataGateway';
 import { normalizeUploadedTrackRecord, type UploadedTrackRecord } from './uploadedTracks';
 
 /**
@@ -39,14 +40,15 @@ export function findUploadLedgerByTxId(txId: string): UploadLedgerEntry | null {
   try {
     const raw = window.localStorage.getItem(LEDGER_KEY);
     const list = (raw ? JSON.parse(raw) : []) as UploadLedgerEntry[];
-    const hit = list.find((e) => e?.txId === txId);
+    const normalizedTxId = normalizeArweaveTxId(txId);
+    const hit = list.find((e) => e?.txId && normalizeArweaveTxId(e.txId) === normalizedTxId);
     if (!hit) return null;
-    const normalized = normalizeUploadedTrackRecord(hit);
-    if (!normalized) return null;
-    const walletAddress = typeof hit.walletAddress === 'string' ? hit.walletAddress : normalized.walletAddress;
+    const record = normalizeUploadedTrackRecord(hit);
+    if (!record) return null;
+    const walletAddress = typeof hit.walletAddress === 'string' ? hit.walletAddress : record.walletAddress;
     return walletAddress
-      ? { ...normalized, walletAddress: normalizeAddr(walletAddress) }
-      : { ...normalized, walletAddress: '' };
+      ? { ...record, walletAddress: normalizeAddr(walletAddress) }
+      : { ...record, walletAddress: '' };
   } catch {
     return null;
   }
