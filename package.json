@@ -15,6 +15,8 @@
     "index:supabase": "node tools/index-streamvault-supabase.mjs",
     "query:supabase": "node tools/query-supabase-index.mjs",
     "test:sdk-index": "node tools/test-sdk-index.mjs",
+    "test:index-api": "node tools/test-index-api.mjs",
+    "test:sdk-index-api": "node tools/test-sdk-index-api.mjs",
     "diag:ao": "node tools/ao-diagnostics.mjs",
     "diag:hb-query": "node tools/hb-query-parity.mjs",
     "diag:orderbook": "node tools/verify-orderbook.mjs",

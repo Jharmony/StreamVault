@@ -32,16 +32,20 @@ export function VaultExplore() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
-  const streamVaultIndex = useMemo(() => {
+  const streamVaultIndexConfig = useMemo(() => {
+    const indexUrl = import.meta.env.VITE_STREAMVAULT_INDEX_URL || (import.meta.env.PROD ? '/api' : '');
     const supabaseUrl =
       import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || '';
     const supabaseKey =
       import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-    return supabaseUrl && supabaseKey ? { supabaseUrl, supabaseKey } : undefined;
+    return {
+      indexUrl: indexUrl || undefined,
+      index: supabaseUrl && supabaseKey ? { supabaseUrl, supabaseKey } : undefined,
+    };
   }, []);
   const streamVaultClient = useMemo(
-    () => createStreamVaultClient({ index: streamVaultIndex }),
-    [streamVaultIndex]
+    () => createStreamVaultClient(streamVaultIndexConfig),
+    [streamVaultIndexConfig]
   );
 
   const handleSearch = async () => {
@@ -61,7 +65,7 @@ export function VaultExplore() {
         gqlTracks = await queryAudioTransactions({ limit: 50 });
         const aoRecords = await searchTracksOnAO({});
         aoTracks = aoRecordsToTracks(aoRecords);
-        if (query.trim() && streamVaultIndex) {
+        if (query.trim() && (streamVaultIndexConfig.indexUrl || streamVaultIndexConfig.index)) {
           indexedTracks = (await streamVaultClient.searchTracks({ q: query.trim(), limit: 50 })).map(indexedTrackToTrack);
         }
       }

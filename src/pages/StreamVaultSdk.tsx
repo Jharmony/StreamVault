@@ -57,16 +57,20 @@ export function StreamVaultSdk() {
     };
   }, []);
 
-  const index = useMemo(() => {
+  const indexConfig = useMemo(() => {
+    const indexUrl = import.meta.env.VITE_STREAMVAULT_INDEX_URL || (import.meta.env.PROD ? '/api' : '');
     const supabaseUrl =
       import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || '';
     const supabaseKey =
       import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-    return supabaseUrl && supabaseKey ? { supabaseUrl, supabaseKey } : undefined;
+    return {
+      indexUrl: indexUrl || undefined,
+      index: supabaseUrl && supabaseKey ? { supabaseUrl, supabaseKey } : undefined,
+    };
   }, []);
   const client = useMemo(
-    () => createStreamVaultClient({ permaweb: libs, ario: arioResolver, index }),
-    [arioResolver, index, libs]
+    () => createStreamVaultClient({ permaweb: libs, ario: arioResolver, ...indexConfig }),
+    [arioResolver, indexConfig, libs]
   );
   const targetProfileRef = profileRefInput.trim() || address || '';
 
@@ -261,10 +265,13 @@ export function StreamVaultSdk() {
         </article>
         <article className={styles.docPanel}>
           <h2>2. Create Client</h2>
-          <p>Initialize permaweb-libs, then pass it into the StreamVault client.</p>
+          <p>Initialize the hosted StreamVault index API, then pass permaweb-libs when you need direct profile fallbacks.</p>
           <pre>{`import { createStreamVaultClient } from '@streamvault/sdk';
 
-const streamvault = createStreamVaultClient({ permaweb });`}</pre>
+const streamvault = createStreamVaultClient({
+  permaweb,
+  indexUrl: 'https://stream-vault.xyz/api',
+});`}</pre>
         </article>
         <article className={styles.docPanel}>
           <h2>3. Load Music</h2>
@@ -279,7 +286,7 @@ const tracks = result.profile
       <section className={styles.panel}>
         <div className={styles.sectionTitleRow}>
           <h2>Production Install</h2>
-          <span>0.0.1-alpha.4</span>
+          <span>0.0.1-alpha.5</span>
         </div>
         <div className={styles.packageBar}>
           <div>
@@ -370,7 +377,10 @@ const permaweb = Permaweb.init({
   gateway: 'https://ao-search-gateway.goldsky.com',
 });
 
-const streamvault = createStreamVaultClient({ permaweb });
+const streamvault = createStreamVaultClient({
+  permaweb,
+  indexUrl: 'https://stream-vault.xyz/api',
+});
 const result = await streamvault.resolveProfile(walletOrProfileId);
 const tracks = result.profile
   ? await streamvault.getTracksByProfile(result.profile, { limit: 50 })

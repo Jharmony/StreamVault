@@ -132,17 +132,21 @@ export function Home() {
   const [streamVaultSearchLoading, setStreamVaultSearchLoading] = useState(false);
   const [streamVaultSearchError, setStreamVaultSearchError] = useState<string | null>(null);
 
-  const streamVaultIndex = useMemo(() => {
+  const streamVaultIndexConfig = useMemo(() => {
+    const indexUrl = import.meta.env.VITE_STREAMVAULT_INDEX_URL || (import.meta.env.PROD ? '/api' : '');
     const supabaseUrl =
       import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || '';
     const supabaseKey =
       import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-    return supabaseUrl && supabaseKey ? { supabaseUrl, supabaseKey } : undefined;
+    return {
+      indexUrl: indexUrl || undefined,
+      index: supabaseUrl && supabaseKey ? { supabaseUrl, supabaseKey } : undefined,
+    };
   }, []);
 
   const streamVaultClient = useMemo(
-    () => createStreamVaultClient({ index: streamVaultIndex }),
-    [streamVaultIndex]
+    () => createStreamVaultClient(streamVaultIndexConfig),
+    [streamVaultIndexConfig]
   );
 
   const discoverTracks = useMemo(() => {
@@ -267,7 +271,7 @@ export function Home() {
   const handleStreamVaultSearch = async () => {
     const q = streamVaultQuery.trim();
     if (!q) return;
-    if (!streamVaultIndex) {
+    if (!streamVaultIndexConfig.indexUrl && !streamVaultIndexConfig.index) {
       setStreamVaultSearchError('StreamVault index is not configured in this environment.');
       setStreamVaultProfiles([]);
       setStreamVaultTracks([]);

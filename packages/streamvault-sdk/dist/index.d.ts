@@ -8,6 +8,7 @@ export type StreamVaultSdkOptions = {
             processId?: string;
         } | null>;
     };
+    indexUrl?: string;
     index?: {
         supabaseUrl?: string;
         supabaseKey?: string;

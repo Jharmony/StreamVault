@@ -27,7 +27,10 @@ const permaweb = Permaweb.init({
   gateway: 'https://ao-search-gateway.goldsky.com',
 });
 
-const streamvault = createStreamVaultClient({ permaweb });
+const streamvault = createStreamVaultClient({
+  permaweb,
+  indexUrl: 'https://stream-vault.xyz/api',
+});
 const result = await streamvault.resolveProfile(walletOrProfileId);
 const tracks = result.profile
   ? await streamvault.getTracksByProfile(result.profile, { limit: 50 })
@@ -45,14 +48,18 @@ for (const track of tracks) {
 Creates the SDK client.
 
 ```ts
-const streamvault = createStreamVaultClient({ permaweb });
+const streamvault = createStreamVaultClient({
+  permaweb,
+  indexUrl: 'https://stream-vault.xyz/api',
+});
 ```
 
 Options:
 
-- `permaweb`: permaweb-libs instance. Required for profile reads.
-- `index.supabaseUrl`: optional StreamVault public Supabase index URL for fast handle/search reads.
-- `index.supabaseKey`: optional Supabase publishable/anon key for public index reads.
+- `indexUrl`: optional StreamVault hosted index API URL. Use `https://stream-vault.xyz/api` for production partner apps.
+- `permaweb`: permaweb-libs instance. Required for direct Arweave/AO profile fallbacks.
+- `index.supabaseUrl`: optional direct Supabase index URL for local/internal testing only.
+- `index.supabaseKey`: optional direct Supabase publishable/anon key for local/internal testing only.
 - `gqlUrl`: optional Arweave L1 GraphQL endpoint override.
 - `aoGatewayUrl`: optional AO GraphQL gateway override.
 - `hbReadNodes`: optional HyperBEAM read node list.
@@ -65,7 +72,7 @@ Options:
 - `getProfileByHandle(handle)`: loads a profile from the StreamVault index when configured.
 - `searchProfiles({ q, limit })`: searches indexed profiles by handle or display name.
 
-Handle lookup requires the StreamVault index configuration. Without it, wallet and profile id lookup still fall back to direct Arweave/AO reads.
+Handle lookup uses the StreamVault hosted index API. Without `indexUrl`, wallet and profile id lookup can still fall back to direct Arweave/AO reads when `permaweb` is configured.
 
 ### Music Methods
 
@@ -109,15 +116,12 @@ for (const track of tracks) {
 
 ## Indexed Lookup
 
-For Audius-like partner flows, configure the public StreamVault index:
+For Audius-like partner flows, use the hosted StreamVault index API:
 
 ```ts
 const streamvault = createStreamVaultClient({
   permaweb,
-  index: {
-    supabaseUrl: 'https://YOUR_PROJECT_REF.supabase.co',
-    supabaseKey: 'sb_publishable_or_anon_key',
-  },
+  indexUrl: 'https://stream-vault.xyz/api',
 });
 
 const profile = await streamvault.getProfileByHandle('lto');
@@ -125,7 +129,7 @@ const tracks = await streamvault.getTracksByHandle('lto', { limit: 20 });
 const searchResults = await streamvault.searchTracks({ q: 'hoodrat', limit: 20 });
 ```
 
-The index supports profile handle/display-name lookup and track title/artist search. The index is a searchable mirror. Arweave/AO remain the source of truth.
+The index supports profile handle/display-name lookup and track title/artist search. Partners do not need Supabase credentials. The index is a searchable mirror; Arweave/AO remain the source of truth.
 
 Field usage:
 
