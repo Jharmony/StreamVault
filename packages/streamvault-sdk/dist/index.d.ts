@@ -8,6 +8,11 @@ export type StreamVaultSdkOptions = {
             processId?: string;
         } | null>;
     };
+    indexUrl?: string;
+    index?: {
+        supabaseUrl?: string;
+        supabaseKey?: string;
+    };
     gatewayUrl?: string;
     gqlUrl?: string;
     aoGatewayUrl?: string;
@@ -77,6 +82,17 @@ export type MarketplaceListing = {
     orderbookId: string | null;
     asks: UcmActiveOrder[];
 };
+export type SearchProfilesArgs = {
+    q: string;
+    limit?: number;
+};
+export type SearchTracksArgs = {
+    q?: string;
+    handle?: string;
+    walletAddress?: string;
+    profileId?: string;
+    limit?: number;
+};
 type AtomicAssetDisplayMetadata = {
     title?: string;
     artist?: string;
@@ -86,7 +102,8 @@ type AtomicAssetDisplayMetadata = {
 export declare function createStreamVaultClient(options?: StreamVaultSdkOptions): {
     getProfileById(profileId: string): Promise<StreamVaultProfile | null>;
     getProfileByWallet(walletAddress: string): Promise<StreamVaultProfile | null>;
-    getProfileByHandle(_handle: string): Promise<StreamVaultProfile | null>;
+    getProfileByHandle(handle: string): Promise<StreamVaultProfile | null>;
+    searchProfiles(args: SearchProfilesArgs): Promise<StreamVaultProfile[]>;
     resolveArNSProfile(name: string): Promise<StreamVaultProfile | null>;
     resolveProfile(ref: string): Promise<StreamVaultProfileResolution>;
     getTracksByWallet(walletAddress: string, args?: {
@@ -95,6 +112,13 @@ export declare function createStreamVaultClient(options?: StreamVaultSdkOptions)
     getTracksByProfile(profile: StreamVaultProfile, args?: {
         limit?: number;
     }): Promise<StreamVaultTrack[]>;
+    getTracksByProfileId(profileId: string, args?: {
+        limit?: number;
+    }): Promise<StreamVaultTrack[]>;
+    getTracksByHandle(handle: string, args?: {
+        limit?: number;
+    }): Promise<StreamVaultTrack[]>;
+    searchTracks(args: SearchTracksArgs): Promise<StreamVaultTrack[]>;
     getTrendingTracks(args?: {
         limit?: number;
     }): Promise<StreamVaultTrack[]>;

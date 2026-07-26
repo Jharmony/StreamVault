@@ -97,6 +97,86 @@ async function gql(endpoint, query, variables) {
         throw new Error(`GraphQL request failed: HTTP ${res.status}`);
     return res.json();
 }
+function normalizeHandle(handle) {
+    return String(handle || '').trim().replace(/^@+/, '').toLowerCase();
+}
+function encodeSupabaseValue(value) {
+    return encodeURIComponent(String(value || '').replace(/"/g, '\\"'));
+}
+async function supabaseSelect(index, table, query) {
+    const url = String(index?.supabaseUrl || '').trim().replace(/\/+$/, '');
+    const key = String(index?.supabaseKey || '').trim();
+    if (!url || !key)
+        return [];
+    const res = await fetch(`${url}/rest/v1/${table}${query}`, {
+        headers: {
+            apikey: key,
+            Authorization: `Bearer ${key}`,
+            Accept: 'application/json',
+        },
+    }).catch(() => null);
+    if (!res?.ok)
+        return [];
+    const json = await res.json().catch(() => null);
+    return Array.isArray(json) ? json : [];
+}
+function normalizeIndexUrl(indexUrl) {
+    return String(indexUrl || '').trim().replace(/\/+$/, '');
+}
+async function indexApiGet(indexUrl, path, params) {
+    const base = normalizeIndexUrl(indexUrl);
+    if (!base)
+        return null;
+    const url = new URL(`${base}${path.startsWith('/') ? path : `/${path}`}`);
+    for (const [key, value] of Object.entries(params || {})) {
+        if (value !== undefined && value !== '')
+            url.searchParams.set(key, String(value));
+    }
+    const res = await fetch(url, { headers: { Accept: 'application/json' } }).catch(() => null);
+    if (!res?.ok)
+        return null;
+    return (await res.json().catch(() => null));
+}
+function indexProfileToProfile(row) {
+    const id = pickString(row?.profile_id) || pickString(row?.id);
+    if (!id)
+        return null;
+    return {
+        id,
+        walletAddress: pickString(row.wallet_address) || pickString(row.walletAddress),
+        displayName: pickString(row.display_name) || pickString(row.displayName),
+        handle: pickString(row.handle),
+        bio: pickString(row.bio),
+        avatarUrl: pickString(row.avatar_url) || pickString(row.avatarUrl),
+        bannerUrl: pickString(row.banner_url) || pickString(row.bannerUrl),
+        assets: Array.isArray(row.assets) ? row.assets : [],
+        raw: row.raw || row,
+    };
+}
+function indexTrackToTrack(row) {
+    const audioTxId = pickString(row?.audio_tx_id) || pickString(row?.audioTxId);
+    if (!audioTxId)
+        return null;
+    const urls = Array.isArray(row.stream_urls) && row.stream_urls.length
+        ? row.stream_urls
+        : Array.isArray(row.streamUrls) && row.streamUrls.length
+            ? row.streamUrls
+            : publicDataUrls(audioTxId);
+    return {
+        id: pickString(row.id) || audioTxId,
+        audioTxId,
+        title: pickString(row.title) || 'Untitled',
+        artist: pickString(row.artist) || 'Unknown artist',
+        artistId: pickString(row.profile_id) || pickString(row.profileId) || pickString(row.owner_wallet) || pickString(row.artistId) || audioTxId,
+        streamUrl: pickString(row.stream_url) || pickString(row.streamUrl) || urls[0],
+        streamUrls: urls,
+        artworkUrl: pickString(row.artwork_url) || pickString(row.artworkUrl) || undefined,
+        assetId: pickString(row.asset_id) || pickString(row.assetId) || undefined,
+        isPermanent: row.is_permanent !== false && row.isPermanent !== false,
+        source: 'arweave',
+        raw: row.raw || row,
+    };
+}
 function tagValue(tags, names) {
     const wanted = new Set(names.map((name) => name.toLowerCase()));
     for (const tag of tags || []) {
@@ -217,12 +297,22 @@ async function findAudioTxIdForAtomicAsset(assetId, endpoint) {
 export function createStreamVaultClient(options = {}) {
     const permaweb = options.permaweb || null;
     const ario = options.ario || undefined;
+    const indexUrl = normalizeIndexUrl(options.indexUrl);
+    const index = options.index;
     const l1Gql = options.gqlUrl || DEFAULT_L1_GQL;
     const aoGateway = options.aoGatewayUrl || DEFAULT_AO_GQL_GATEWAY;
     const hbNodes = options.hbReadNodes || DEFAULT_HB_NODES;
     return {
         async getProfileById(profileId) {
             const id = String(profileId || '').trim();
+            const indexedFromApi = await indexApiGet(indexUrl, `/profiles/${encodeURIComponent(id)}`);
+            const apiProfile = indexProfileToProfile(indexedFromApi?.profile);
+            if (apiProfile)
+                return apiProfile;
+            const [indexed] = await supabaseSelect(index, 'profiles', `?profile_id=eq.${encodeSupabaseValue(id)}&select=*&limit=1`);
+            const indexedProfile = indexProfileToProfile(indexed);
+            if (indexedProfile)
+                return indexedProfile;
             if (!permaweb || !id)
                 return null;
             const profile = await permaweb.getProfileById(id).catch(() => null);
@@ -230,6 +320,14 @@ export function createStreamVaultClient(options = {}) {
         },
         async getProfileByWallet(walletAddress) {
             const wallet = String(walletAddress || '').trim();
+            const indexedFromApi = await indexApiGet(indexUrl, `/wallets/${encodeURIComponent(wallet)}`);
+            const apiProfile = indexProfileToProfile(indexedFromApi?.profile);
+            if (apiProfile)
+                return apiProfile;
+            const [indexed] = await supabaseSelect(index, 'profiles', `?wallet_address=eq.${encodeSupabaseValue(wallet)}&select=*&order=indexed_at.desc&limit=1`);
+            const indexedProfile = indexProfileToProfile(indexed);
+            if (indexedProfile)
+                return indexedProfile;
             if (!permaweb || !wallet)
                 return null;
             if (permaweb.getProfileByWalletAddress) {
@@ -256,8 +354,28 @@ export function createStreamVaultClient(options = {}) {
             }
             return null;
         },
-        async getProfileByHandle(_handle) {
-            return null;
+        async getProfileByHandle(handle) {
+            const normalized = normalizeHandle(handle);
+            if (!normalized)
+                return null;
+            const indexedFromApi = await indexApiGet(indexUrl, `/profiles/handle/${encodeURIComponent(normalized)}`);
+            const apiProfile = indexProfileToProfile(indexedFromApi?.profile);
+            if (apiProfile)
+                return apiProfile;
+            const [indexed] = await supabaseSelect(index, 'profiles', `?handle_normalized=eq.${encodeSupabaseValue(normalized)}&select=*&limit=1`);
+            return indexProfileToProfile(indexed);
+        },
+        async searchProfiles(args) {
+            const q = String(args?.q || '').trim();
+            if (!q)
+                return [];
+            const limit = normalizeLimit(args?.limit, 20);
+            const indexedFromApi = await indexApiGet(indexUrl, '/profiles/search', { q, limit });
+            const apiProfiles = (indexedFromApi?.profiles || []).map(indexProfileToProfile).filter(Boolean);
+            if (apiProfiles.length > 0)
+                return apiProfiles;
+            const rows = await supabaseSelect(index, 'profiles', `?or=(handle_normalized.ilike.*${encodeSupabaseValue(normalizeHandle(q))}*,display_name.ilike.*${encodeSupabaseValue(q)}*)&select=*&order=indexed_at.desc&limit=${limit}`);
+            return rows.map(indexProfileToProfile).filter(Boolean);
         },
         async resolveArNSProfile(name) {
             const arnsName = String(name || '').trim().replace(/\.ar\.io$/i, '').replace(/\.ar$/i, '');
@@ -290,6 +408,14 @@ export function createStreamVaultClient(options = {}) {
             if (!wallet)
                 return [];
             const limit = normalizeLimit(args?.limit, 50);
+            const indexedFromApi = await indexApiGet(indexUrl, `/wallets/${encodeURIComponent(wallet)}/tracks`, { limit });
+            const apiTracks = (indexedFromApi?.tracks || []).map(indexTrackToTrack).filter(Boolean);
+            if (apiTracks.length > 0)
+                return apiTracks;
+            const indexed = await supabaseSelect(index, 'tracks', `?owner_wallet=eq.${encodeSupabaseValue(wallet)}&select=*&order=created_at.desc.nullslast&limit=${limit}`);
+            const indexedTracks = indexed.map(indexTrackToTrack).filter(Boolean);
+            if (indexedTracks.length > 0)
+                return indexedTracks;
             const json = await gql(l1Gql, `query StreamVaultAudioByOwner($tags: [TagFilter!]!, $owners: [String!], $first: Int!) {
           transactions(tags: $tags, owners: $owners, first: $first, sort: HEIGHT_DESC) {
             edges { node { id tags { name value } block { timestamp } owner { address } } }
@@ -306,6 +432,16 @@ export function createStreamVaultClient(options = {}) {
         },
         async getTracksByProfile(profile, args) {
             const limit = normalizeLimit(args?.limit, 50);
+            if (profile.id) {
+                const indexedFromApi = await indexApiGet(indexUrl, `/profiles/${encodeURIComponent(profile.id)}/tracks`, { limit });
+                const apiTracks = (indexedFromApi?.tracks || []).map(indexTrackToTrack).filter(Boolean);
+                if (apiTracks.length > 0)
+                    return apiTracks;
+                const indexed = await supabaseSelect(index, 'tracks', `?profile_id=eq.${encodeSupabaseValue(profile.id)}&select=*&order=created_at.desc.nullslast&limit=${limit}`);
+                const indexedTracks = indexed.map(indexTrackToTrack).filter(Boolean);
+                if (indexedTracks.length > 0)
+                    return indexedTracks;
+            }
             const fallbackArtist = profile.displayName || profile.handle || profile.walletAddress || '';
             const [walletTracks, assetTracks] = await Promise.all([
                 profile.walletAddress ? this.getTracksByWallet(profile.walletAddress, { limit }) : Promise.resolve([]),
@@ -322,8 +458,46 @@ export function createStreamVaultClient(options = {}) {
             ]);
             return mergeTracks(walletTracks, assetTracks.filter(Boolean)).slice(0, limit);
         },
+        async getTracksByProfileId(profileId, args) {
+            const profile = await this.getProfileById(profileId);
+            if (!profile)
+                return [];
+            return this.getTracksByProfile(profile, args);
+        },
+        async getTracksByHandle(handle, args) {
+            const profile = await this.getProfileByHandle(handle);
+            if (!profile)
+                return [];
+            return this.getTracksByProfile(profile, args);
+        },
+        async searchTracks(args) {
+            const limit = normalizeLimit(args?.limit, 20);
+            if (args?.handle)
+                return this.getTracksByHandle(args.handle, { limit });
+            if (args?.profileId)
+                return this.getTracksByProfileId(args.profileId, { limit });
+            if (args?.walletAddress)
+                return this.getTracksByWallet(args.walletAddress, { limit });
+            const q = String(args?.q || '').trim();
+            if (!q)
+                return [];
+            const indexedFromApi = await indexApiGet(indexUrl, '/tracks/search', { q, limit });
+            const apiTracks = (indexedFromApi?.tracks || []).map(indexTrackToTrack).filter(Boolean);
+            if (apiTracks.length > 0)
+                return apiTracks;
+            const rows = await supabaseSelect(index, 'tracks', `?or=(title.ilike.*${encodeSupabaseValue(q)}*,artist.ilike.*${encodeSupabaseValue(q)}*)&select=*&order=created_at.desc.nullslast&limit=${limit}`);
+            return rows.map(indexTrackToTrack).filter(Boolean);
+        },
         async getTrendingTracks(args) {
             const limit = normalizeLimit(args?.limit, 24);
+            const indexedFromApi = await indexApiGet(indexUrl, '/tracks/trending', { limit });
+            const apiTracks = (indexedFromApi?.tracks || []).map(indexTrackToTrack).filter(Boolean);
+            if (apiTracks.length > 0)
+                return apiTracks;
+            const indexed = await supabaseSelect(index, 'tracks', `?select=*&order=created_at.desc.nullslast&limit=${limit}`);
+            const indexedTracks = indexed.map(indexTrackToTrack).filter(Boolean);
+            if (indexedTracks.length > 0)
+                return indexedTracks;
             const json = await gql(l1Gql, `query StreamVaultAudio($tags: [TagFilter!]!, $first: Int!) {
           transactions(tags: $tags, first: $first, sort: HEIGHT_DESC) {
             edges { node { id tags { name value } block { timestamp } owner { address } } }

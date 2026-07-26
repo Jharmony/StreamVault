@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useWallet } from '../context/WalletContext';
 import { usePermaweb } from '../context/PermawebContext';
+import { trackDetailPath } from '../lib/arweaveTxDetail';
 import {
   createStreamVaultClient,
   type AssetUcmMarketStatus,
@@ -33,6 +35,11 @@ export function StreamVaultSdk() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [installCopied, setInstallCopied] = useState(false);
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogProfiles, setCatalogProfiles] = useState<StreamVaultProfile[]>([]);
+  const [catalogTracks, setCatalogTracks] = useState<StreamVaultTrack[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,7 +57,21 @@ export function StreamVaultSdk() {
     };
   }, []);
 
-  const client = useMemo(() => createStreamVaultClient({ permaweb: libs, ario: arioResolver }), [arioResolver, libs]);
+  const indexConfig = useMemo(() => {
+    const indexUrl = import.meta.env.VITE_STREAMVAULT_INDEX_URL || (import.meta.env.PROD ? '/api' : '');
+    const supabaseUrl =
+      import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || '';
+    const supabaseKey =
+      import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+    return {
+      indexUrl: indexUrl || undefined,
+      index: supabaseUrl && supabaseKey ? { supabaseUrl, supabaseKey } : undefined,
+    };
+  }, []);
+  const client = useMemo(
+    () => createStreamVaultClient({ permaweb: libs, ario: arioResolver, ...indexConfig }),
+    [arioResolver, indexConfig, libs]
+  );
   const targetProfileRef = profileRefInput.trim() || address || '';
 
   const copyInstallCommand = useCallback(async () => {
@@ -111,6 +132,30 @@ export function StreamVaultSdk() {
     }
   }, [client, connect, targetProfileRef, walletType]);
 
+  const searchCatalog = useCallback(async () => {
+    const q = catalogQuery.trim();
+    if (!q) return;
+    setCatalogLoading(true);
+    setCatalogError(null);
+    try {
+      const [profilesResult, tracksResult] = await Promise.all([
+        client.searchProfiles({ q, limit: 5 }),
+        client.searchTracks({ q, limit: 10 }),
+      ]);
+      setCatalogProfiles(profilesResult);
+      setCatalogTracks(tracksResult);
+      if (profilesResult.length === 0 && tracksResult.length === 0) {
+        setCatalogError('No indexed StreamVault profiles or tracks matched that search.');
+      }
+    } catch (e: any) {
+      setCatalogProfiles([]);
+      setCatalogTracks([]);
+      setCatalogError(e?.message || 'Indexed catalog search failed.');
+    } finally {
+      setCatalogLoading(false);
+    }
+  }, [catalogQuery, client]);
+
   return (
     <div className={styles.page}>
       <section className={styles.header}>
@@ -145,9 +190,71 @@ export function StreamVaultSdk() {
           </p>
         ) : null}
         <p className={styles.muted}>
-          Alpha lookup supports wallet addresses and profile zone ids. Handle and ArNS lookup need a
-          dedicated public index before partners should rely on them.
+          Indexed handle lookup is active for Zone profile handles. Wallet and profile id lookup can also
+          fall back to direct Arweave/AO reads.
         </p>
+      </section>
+
+      <section className={styles.panel}>
+        <div className={styles.sectionTitleRow}>
+          <h2>Indexed Catalog Search</h2>
+          <span>profiles + tracks</span>
+        </div>
+        <form
+          className={styles.searchRow}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void searchCatalog();
+          }}
+        >
+          <input
+            className={styles.input}
+            value={catalogQuery}
+            onChange={(event) => setCatalogQuery(event.target.value)}
+            placeholder="Search a handle, artist, or track title"
+          />
+          <button type="submit" className={styles.button} disabled={catalogLoading}>
+            {catalogLoading ? 'Searching...' : 'Search'}
+          </button>
+        </form>
+        {catalogError ? <p className={styles.error}>{catalogError}</p> : null}
+        {(catalogProfiles.length > 0 || catalogTracks.length > 0) && (
+          <div className={styles.catalogResults}>
+            {catalogProfiles.length > 0 && (
+              <div className={styles.resultGroup}>
+                <p className={styles.resultLabel}>Profiles</p>
+                {catalogProfiles.map((row) => (
+                  <Link key={row.id || row.walletAddress || row.handle || 'profile'} to={`/profile/${row.id || row.walletAddress}`} className={styles.resultRow}>
+                    {row.avatarUrl ? <img src={row.avatarUrl} alt="" /> : <span />}
+                    <div>
+                      <strong>{row.displayName || row.handle || 'Unnamed profile'}</strong>
+                      <small>{row.handle ? `@${row.handle}` : shortId(row.walletAddress)}</small>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+            {catalogTracks.length > 0 && (
+              <div className={styles.resultGroup}>
+                <p className={styles.resultLabel}>Tracks</p>
+                {catalogTracks.map((row) => (
+                  <div key={row.audioTxId} className={styles.trackResultRow}>
+                    <Link to={trackDetailPath(row.audioTxId)} className={styles.resultRow}>
+                      {row.artworkUrl ? <img src={row.artworkUrl} alt="" /> : <span />}
+                      <div>
+                        <strong>{row.title}</strong>
+                        <small>{row.artist}</small>
+                      </div>
+                    </Link>
+                    <Link to={`/profile/${row.artistId}`} className={styles.artistLink}>
+                      Artist
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       <section className={styles.docsGrid}>
@@ -158,10 +265,13 @@ export function StreamVaultSdk() {
         </article>
         <article className={styles.docPanel}>
           <h2>2. Create Client</h2>
-          <p>Initialize permaweb-libs, then pass it into the StreamVault client.</p>
+          <p>Initialize the hosted StreamVault index API, then pass permaweb-libs when you need direct profile fallbacks.</p>
           <pre>{`import { createStreamVaultClient } from '@streamvault/sdk';
 
-const streamvault = createStreamVaultClient({ permaweb });`}</pre>
+const streamvault = createStreamVaultClient({
+  permaweb,
+  indexUrl: 'https://stream-vault.xyz/api',
+});`}</pre>
         </article>
         <article className={styles.docPanel}>
           <h2>3. Load Music</h2>
@@ -176,7 +286,7 @@ const tracks = result.profile
       <section className={styles.panel}>
         <div className={styles.sectionTitleRow}>
           <h2>Production Install</h2>
-          <span>0.0.1-alpha.2</span>
+          <span>0.0.1-alpha.5</span>
         </div>
         <div className={styles.packageBar}>
           <div>
@@ -267,7 +377,10 @@ const permaweb = Permaweb.init({
   gateway: 'https://ao-search-gateway.goldsky.com',
 });
 
-const streamvault = createStreamVaultClient({ permaweb });
+const streamvault = createStreamVaultClient({
+  permaweb,
+  indexUrl: 'https://stream-vault.xyz/api',
+});
 const result = await streamvault.resolveProfile(walletOrProfileId);
 const tracks = result.profile
   ? await streamvault.getTracksByProfile(result.profile, { limit: 50 })
