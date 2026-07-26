@@ -123,11 +123,23 @@ async function supabaseSelect(index, table, query) {
 function normalizeIndexUrl(indexUrl) {
     return String(indexUrl || '').trim().replace(/\/+$/, '');
 }
+function getUrlBase() {
+    if (typeof globalThis !== 'undefined') {
+        const origin = globalThis.location?.origin;
+        if (typeof origin === 'string' && origin)
+            return origin;
+    }
+    return undefined;
+}
 async function indexApiGet(indexUrl, path, params) {
     const base = normalizeIndexUrl(indexUrl);
     if (!base)
         return null;
-    const url = new URL(`${base}${path.startsWith('/') ? path : `/${path}`}`);
+    const target = `${base}${path.startsWith('/') ? path : `/${path}`}`;
+    const urlBase = /^https?:\/\//i.test(target) ? undefined : getUrlBase();
+    if (!urlBase && !/^https?:\/\//i.test(target))
+        return null;
+    const url = new URL(target, urlBase);
     for (const [key, value] of Object.entries(params || {})) {
         if (value !== undefined && value !== '')
             url.searchParams.set(key, String(value));
