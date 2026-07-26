@@ -43,6 +43,11 @@ import { bazarAssetUrl } from '../lib/ucm';
 import { findUploadLedgerByTxId } from '../lib/uploadLedger';
 import { useAudiusAuth } from '../context/AudiusAuthContext';
 import { PublishModal } from '../components/PublishModal';
+import {
+  createStreamVaultClient,
+  type StreamVaultProfile,
+  type StreamVaultTrack,
+} from '../../packages/streamvault-sdk/src';
 
 function mapAudiusToTrack(a: AudiusTrack): Track {
   return {
@@ -121,6 +126,24 @@ export function Home() {
   const [atomicAssetByAudioTx, setAtomicAssetByAudioTx] = useState<Record<string, string>>({});
   const [marketListings, setMarketListings] = useState<MarketplaceListing[]>([]);
   const [marketLoading, setMarketLoading] = useState(true);
+  const [streamVaultQuery, setStreamVaultQuery] = useState('');
+  const [streamVaultProfiles, setStreamVaultProfiles] = useState<StreamVaultProfile[]>([]);
+  const [streamVaultTracks, setStreamVaultTracks] = useState<StreamVaultTrack[]>([]);
+  const [streamVaultSearchLoading, setStreamVaultSearchLoading] = useState(false);
+  const [streamVaultSearchError, setStreamVaultSearchError] = useState<string | null>(null);
+
+  const streamVaultIndex = useMemo(() => {
+    const supabaseUrl =
+      import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || '';
+    const supabaseKey =
+      import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+    return supabaseUrl && supabaseKey ? { supabaseUrl, supabaseKey } : undefined;
+  }, []);
+
+  const streamVaultClient = useMemo(
+    () => createStreamVaultClient({ index: streamVaultIndex }),
+    [streamVaultIndex]
+  );
 
   const discoverTracks = useMemo(() => {
     const isFeedTestTrack = (title: string) => title.toLowerCase().includes('test');
@@ -238,6 +261,36 @@ export function Home() {
       setAudiusError(e?.message || 'Failed to load Audius profile.');
     } finally {
       setAudiusLoading(false);
+    }
+  };
+
+  const handleStreamVaultSearch = async () => {
+    const q = streamVaultQuery.trim();
+    if (!q) return;
+    if (!streamVaultIndex) {
+      setStreamVaultSearchError('StreamVault index is not configured in this environment.');
+      setStreamVaultProfiles([]);
+      setStreamVaultTracks([]);
+      return;
+    }
+    setStreamVaultSearchLoading(true);
+    setStreamVaultSearchError(null);
+    try {
+      const [profilesResult, tracksResult] = await Promise.all([
+        streamVaultClient.searchProfiles({ q, limit: 4 }),
+        streamVaultClient.searchTracks({ q, limit: 8 }),
+      ]);
+      setStreamVaultProfiles(profilesResult);
+      setStreamVaultTracks(tracksResult);
+      if (profilesResult.length === 0 && tracksResult.length === 0) {
+        setStreamVaultSearchError('No StreamVault profiles or tracks matched that search.');
+      }
+    } catch (e: any) {
+      setStreamVaultSearchError(e?.message || 'StreamVault search failed.');
+      setStreamVaultProfiles([]);
+      setStreamVaultTracks([]);
+    } finally {
+      setStreamVaultSearchLoading(false);
     }
   };
 
@@ -415,9 +468,69 @@ export function Home() {
   return (
     <div className={styles.page}>
       <section className={styles.hero}>
-        <p className={styles.heroSubtitle}>
-          Connect Audius to import metadata, then upload audio + art to Arweave.
-        </p>
+        <div className={styles.streamVaultSearchBlock}>
+          <form
+            className={styles.streamVaultSearch}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleStreamVaultSearch();
+            }}
+          >
+            <input
+              className={styles.streamVaultSearchInput}
+              value={streamVaultQuery}
+              onChange={(event) => setStreamVaultQuery(event.target.value)}
+              placeholder="Search StreamVault artists, handles, or tracks"
+            />
+            <button type="submit" className={styles.streamVaultSearchBtn} disabled={streamVaultSearchLoading}>
+              {streamVaultSearchLoading ? 'Searching…' : 'Search'}
+            </button>
+          </form>
+          {(streamVaultProfiles.length > 0 || streamVaultTracks.length > 0 || streamVaultSearchError) && (
+            <div className={styles.streamVaultResults}>
+              {streamVaultProfiles.length > 0 && (
+                <div className={styles.streamVaultResultGroup}>
+                  <span className={styles.streamVaultResultLabel}>Artists</span>
+                  {streamVaultProfiles.map((profile) => (
+                    <Link
+                      key={profile.id || profile.walletAddress || profile.handle || 'profile'}
+                      to={`/profile/${profile.id || profile.walletAddress}`}
+                      className={styles.streamVaultResultRow}
+                    >
+                      {profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : <span />}
+                      <div>
+                        <strong>{profile.displayName || profile.handle || 'Unnamed artist'}</strong>
+                        <small>{profile.handle ? `@${profile.handle}` : profile.walletAddress}</small>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
+              {streamVaultTracks.length > 0 && (
+                <div className={styles.streamVaultResultGroup}>
+                  <span className={styles.streamVaultResultLabel}>Tracks</span>
+                  {streamVaultTracks.map((track) => (
+                    <div key={track.audioTxId} className={styles.streamVaultTrackRow}>
+                      <Link to={trackDetailPath(track.audioTxId)} className={styles.streamVaultResultRow}>
+                        {track.artworkUrl ? <img src={track.artworkUrl} alt="" /> : <span />}
+                        <div>
+                          <strong>{track.title}</strong>
+                          <small>{track.artist}</small>
+                        </div>
+                      </Link>
+                      {track.artistId && (
+                        <Link to={`/profile/${track.artistId}`} className={styles.streamVaultArtistLink}>
+                          Artist
+                        </Link>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {streamVaultSearchError && <p className={styles.streamVaultSearchError}>{streamVaultSearchError}</p>}
+            </div>
+          )}
+        </div>
         <div className={styles.heroCtas}>
           <div className={styles.audiusConnectCard}>
             <div className={styles.audiusConnectText}>
@@ -426,9 +539,9 @@ export function Home() {
               </strong>
               <span>
                 {connectedAudiusUser
-                  ? 'Imports are ready.'
+                  ? 'Imports are ready. Upload audio + art to Arweave when you are ready.'
                   : apiKeyConfigured
-                    ? 'Import tracks + cover art into StreamVault.'
+                    ? 'Import Audius metadata, then upload audio + art to Arweave.'
                     : 'Set VITE_AUDIUS_API_KEY to enable imports.'}
               </span>
             </div>

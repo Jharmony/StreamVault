@@ -97,6 +97,64 @@ async function gql(endpoint, query, variables) {
         throw new Error(`GraphQL request failed: HTTP ${res.status}`);
     return res.json();
 }
+function normalizeHandle(handle) {
+    return String(handle || '').trim().replace(/^@+/, '').toLowerCase();
+}
+function encodeSupabaseValue(value) {
+    return encodeURIComponent(String(value || '').replace(/"/g, '\\"'));
+}
+async function supabaseSelect(index, table, query) {
+    const url = String(index?.supabaseUrl || '').trim().replace(/\/+$/, '');
+    const key = String(index?.supabaseKey || '').trim();
+    if (!url || !key)
+        return [];
+    const res = await fetch(`${url}/rest/v1/${table}${query}`, {
+        headers: {
+            apikey: key,
+            Authorization: `Bearer ${key}`,
+            Accept: 'application/json',
+        },
+    }).catch(() => null);
+    if (!res?.ok)
+        return [];
+    const json = await res.json().catch(() => null);
+    return Array.isArray(json) ? json : [];
+}
+function indexProfileToProfile(row) {
+    if (!row?.profile_id)
+        return null;
+    return {
+        id: String(row.profile_id),
+        walletAddress: pickString(row.wallet_address),
+        displayName: pickString(row.display_name),
+        handle: pickString(row.handle),
+        bio: pickString(row.bio),
+        avatarUrl: pickString(row.avatar_url),
+        bannerUrl: pickString(row.banner_url),
+        assets: [],
+        raw: row.raw || row,
+    };
+}
+function indexTrackToTrack(row) {
+    const audioTxId = pickString(row?.audio_tx_id);
+    if (!audioTxId)
+        return null;
+    const urls = Array.isArray(row.stream_urls) && row.stream_urls.length ? row.stream_urls : publicDataUrls(audioTxId);
+    return {
+        id: pickString(row.id) || audioTxId,
+        audioTxId,
+        title: pickString(row.title) || 'Untitled',
+        artist: pickString(row.artist) || 'Unknown artist',
+        artistId: pickString(row.profile_id) || pickString(row.owner_wallet) || audioTxId,
+        streamUrl: pickString(row.stream_url) || urls[0],
+        streamUrls: urls,
+        artworkUrl: pickString(row.artwork_url) || undefined,
+        assetId: pickString(row.asset_id) || undefined,
+        isPermanent: row.is_permanent !== false,
+        source: 'arweave',
+        raw: row.raw || row,
+    };
+}
 function tagValue(tags, names) {
     const wanted = new Set(names.map((name) => name.toLowerCase()));
     for (const tag of tags || []) {
@@ -217,12 +275,17 @@ async function findAudioTxIdForAtomicAsset(assetId, endpoint) {
 export function createStreamVaultClient(options = {}) {
     const permaweb = options.permaweb || null;
     const ario = options.ario || undefined;
+    const index = options.index;
     const l1Gql = options.gqlUrl || DEFAULT_L1_GQL;
     const aoGateway = options.aoGatewayUrl || DEFAULT_AO_GQL_GATEWAY;
     const hbNodes = options.hbReadNodes || DEFAULT_HB_NODES;
     return {
         async getProfileById(profileId) {
             const id = String(profileId || '').trim();
+            const [indexed] = await supabaseSelect(index, 'profiles', `?profile_id=eq.${encodeSupabaseValue(id)}&select=*&limit=1`);
+            const indexedProfile = indexProfileToProfile(indexed);
+            if (indexedProfile)
+                return indexedProfile;
             if (!permaweb || !id)
                 return null;
             const profile = await permaweb.getProfileById(id).catch(() => null);
@@ -230,6 +293,10 @@ export function createStreamVaultClient(options = {}) {
         },
         async getProfileByWallet(walletAddress) {
             const wallet = String(walletAddress || '').trim();
+            const [indexed] = await supabaseSelect(index, 'profiles', `?wallet_address=eq.${encodeSupabaseValue(wallet)}&select=*&order=indexed_at.desc&limit=1`);
+            const indexedProfile = indexProfileToProfile(indexed);
+            if (indexedProfile)
+                return indexedProfile;
             if (!permaweb || !wallet)
                 return null;
             if (permaweb.getProfileByWalletAddress) {
@@ -256,8 +323,20 @@ export function createStreamVaultClient(options = {}) {
             }
             return null;
         },
-        async getProfileByHandle(_handle) {
-            return null;
+        async getProfileByHandle(handle) {
+            const normalized = normalizeHandle(handle);
+            if (!normalized)
+                return null;
+            const [indexed] = await supabaseSelect(index, 'profiles', `?handle_normalized=eq.${encodeSupabaseValue(normalized)}&select=*&limit=1`);
+            return indexProfileToProfile(indexed);
+        },
+        async searchProfiles(args) {
+            const q = String(args?.q || '').trim();
+            if (!q)
+                return [];
+            const limit = normalizeLimit(args?.limit, 20);
+            const rows = await supabaseSelect(index, 'profiles', `?or=(handle_normalized.ilike.*${encodeSupabaseValue(normalizeHandle(q))}*,display_name.ilike.*${encodeSupabaseValue(q)}*)&select=*&order=indexed_at.desc&limit=${limit}`);
+            return rows.map(indexProfileToProfile).filter(Boolean);
         },
         async resolveArNSProfile(name) {
             const arnsName = String(name || '').trim().replace(/\.ar\.io$/i, '').replace(/\.ar$/i, '');
@@ -290,6 +369,10 @@ export function createStreamVaultClient(options = {}) {
             if (!wallet)
                 return [];
             const limit = normalizeLimit(args?.limit, 50);
+            const indexed = await supabaseSelect(index, 'tracks', `?owner_wallet=eq.${encodeSupabaseValue(wallet)}&select=*&order=created_at.desc.nullslast&limit=${limit}`);
+            const indexedTracks = indexed.map(indexTrackToTrack).filter(Boolean);
+            if (indexedTracks.length > 0)
+                return indexedTracks;
             const json = await gql(l1Gql, `query StreamVaultAudioByOwner($tags: [TagFilter!]!, $owners: [String!], $first: Int!) {
           transactions(tags: $tags, owners: $owners, first: $first, sort: HEIGHT_DESC) {
             edges { node { id tags { name value } block { timestamp } owner { address } } }
@@ -306,6 +389,12 @@ export function createStreamVaultClient(options = {}) {
         },
         async getTracksByProfile(profile, args) {
             const limit = normalizeLimit(args?.limit, 50);
+            if (profile.id) {
+                const indexed = await supabaseSelect(index, 'tracks', `?profile_id=eq.${encodeSupabaseValue(profile.id)}&select=*&order=created_at.desc.nullslast&limit=${limit}`);
+                const indexedTracks = indexed.map(indexTrackToTrack).filter(Boolean);
+                if (indexedTracks.length > 0)
+                    return indexedTracks;
+            }
             const fallbackArtist = profile.displayName || profile.handle || profile.walletAddress || '';
             const [walletTracks, assetTracks] = await Promise.all([
                 profile.walletAddress ? this.getTracksByWallet(profile.walletAddress, { limit }) : Promise.resolve([]),
@@ -322,8 +411,38 @@ export function createStreamVaultClient(options = {}) {
             ]);
             return mergeTracks(walletTracks, assetTracks.filter(Boolean)).slice(0, limit);
         },
+        async getTracksByProfileId(profileId, args) {
+            const profile = await this.getProfileById(profileId);
+            if (!profile)
+                return [];
+            return this.getTracksByProfile(profile, args);
+        },
+        async getTracksByHandle(handle, args) {
+            const profile = await this.getProfileByHandle(handle);
+            if (!profile)
+                return [];
+            return this.getTracksByProfile(profile, args);
+        },
+        async searchTracks(args) {
+            const limit = normalizeLimit(args?.limit, 20);
+            if (args?.handle)
+                return this.getTracksByHandle(args.handle, { limit });
+            if (args?.profileId)
+                return this.getTracksByProfileId(args.profileId, { limit });
+            if (args?.walletAddress)
+                return this.getTracksByWallet(args.walletAddress, { limit });
+            const q = String(args?.q || '').trim();
+            if (!q)
+                return [];
+            const rows = await supabaseSelect(index, 'tracks', `?or=(title.ilike.*${encodeSupabaseValue(q)}*,artist.ilike.*${encodeSupabaseValue(q)}*)&select=*&order=created_at.desc.nullslast&limit=${limit}`);
+            return rows.map(indexTrackToTrack).filter(Boolean);
+        },
         async getTrendingTracks(args) {
             const limit = normalizeLimit(args?.limit, 24);
+            const indexed = await supabaseSelect(index, 'tracks', `?select=*&order=created_at.desc.nullslast&limit=${limit}`);
+            const indexedTracks = indexed.map(indexTrackToTrack).filter(Boolean);
+            if (indexedTracks.length > 0)
+                return indexedTracks;
             const json = await gql(l1Gql, `query StreamVaultAudio($tags: [TagFilter!]!, $first: Int!) {
           transactions(tags: $tags, first: $first, sort: HEIGHT_DESC) {
             edges { node { id tags { name value } block { timestamp } owner { address } } }

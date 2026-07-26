@@ -8,7 +8,7 @@ Current npm release:
 npm install @streamvault/sdk@alpha @permaweb/libs @permaweb/aoconnect arweave
 ```
 
-Published package: `@streamvault/sdk@0.0.1-alpha.2`
+Published package: `@streamvault/sdk@0.0.1-alpha.4`
 
 npm package page: https://www.npmjs.com/package/@streamvault/sdk
 
@@ -62,16 +62,19 @@ Creates the read-only SDK client.
 Options:
 
 - `permaweb`: permaweb-libs instance for profile-zone reads.
+- `index.supabaseUrl`: optional StreamVault public Supabase index URL for fast handle/search reads.
+- `index.supabaseKey`: optional Supabase publishable/anon key for public index reads.
 - `gqlUrl`: optional Arweave L1 GraphQL endpoint override.
 - `aoGatewayUrl`: optional AO GraphQL gateway override.
 - `hbReadNodes`: optional HyperBEAM read nodes for AO atomic asset metadata.
-- `ario`: optional ARIO-compatible resolver reserved for future ArNS support.
 
 ## Profile API
 
 - `resolveProfile(ref)`: accepts an Arweave wallet address or profile zone process id.
 - `getProfileByWallet(walletAddress)`: loads the profile for a wallet.
 - `getProfileById(profileId)`: loads a profile zone directly.
+- `getProfileByHandle(handle)`: loads a profile from the StreamVault index when configured.
+- `searchProfiles({ q, limit })`: searches indexed profiles by handle or display name.
 
 Return type: `StreamVaultProfile`
 
@@ -80,7 +83,10 @@ Fields include `id`, `walletAddress`, `displayName`, `handle`, `bio`, `avatarUrl
 ## Music API
 
 - `getTracksByProfile(profile, { limit })`: loads wallet uploads and music atomic assets referenced by the profile zone.
+- `getTracksByProfileId(profileId, { limit })`: loads indexed/direct tracks for a profile zone id.
+- `getTracksByHandle(handle, { limit })`: loads tracks by indexed Zone profile handle.
 - `getTracksByWallet(walletAddress, { limit })`: loads public StreamVault uploads owned by a wallet.
+- `searchTracks({ q, handle, walletAddress, profileId, limit })`: searches indexed tracks or routes to specific indexed lookups.
 - `getTrendingTracks({ limit })`: loads recent public StreamVault music uploads.
 - `getStreamUrls(audioTxId)`: returns public playback gateway URLs.
 - `getPreferredStreamUrl(audioTxId)`: returns the default playback URL.
@@ -115,6 +121,26 @@ for (const track of tracks) {
   });
 }
 ```
+
+## Indexed Lookup
+
+For Audius-like partner flows, configure the public StreamVault index:
+
+```ts
+const streamvault = createStreamVaultClient({
+  permaweb,
+  index: {
+    supabaseUrl: 'https://YOUR_PROJECT_REF.supabase.co',
+    supabaseKey: 'sb_publishable_or_anon_key',
+  },
+});
+
+const profile = await streamvault.getProfileByHandle('lto');
+const tracks = await streamvault.getTracksByHandle('lto', { limit: 20 });
+const searchResults = await streamvault.searchTracks({ q: 'hoodrat', limit: 20 });
+```
+
+The index supports profile handle/display-name lookup and track title/artist search. The index is a searchable mirror. Arweave/AO remain the source of truth.
 
 Field usage:
 
@@ -156,7 +182,5 @@ Example player mapping:
 - `getMarketplaceListings({ limit })`: reserved for broader listing discovery.
 
 ## Alpha Limits
-
-Handle and ArNS lookup are not part of the reliable alpha surface yet. They need a dedicated public StreamVault handle index so partners are not forced to scan profile-zone state.
 
 Public Arweave uploads are playable by anyone. UDL metadata describes rights and terms, but does not restrict playback by itself. Private paid playback will need encrypted uploads and key-grant logic on top of the public metadata.

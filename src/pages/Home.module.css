@@ -22,6 +22,144 @@
   text-align: center;
 }
 
+.streamVaultSearchBlock {
+  width: min(760px, 100%);
+  margin: 16px auto 0;
+}
+
+.streamVaultSearch {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid rgba(240, 178, 63, 0.24);
+  border-radius: 999px;
+  background:
+    radial-gradient(120% 160% at 15% 0%, rgba(240, 178, 63, 0.12), rgba(0, 0, 0, 0) 58%),
+    rgba(19, 19, 22, 0.9);
+  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.28);
+}
+
+.streamVaultSearchInput {
+  min-width: 0;
+  flex: 1;
+  padding: 14px 18px;
+  border: none;
+  border-radius: 999px;
+  outline: none;
+  color: var(--text-primary);
+  background: transparent;
+  font-size: var(--text-base);
+}
+
+.streamVaultSearchBtn {
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 999px;
+  color: #171006;
+  background: #f0b23f;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  white-space: nowrap;
+}
+
+.streamVaultSearchBtn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.streamVaultResults {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--bg-glass-border);
+  border-radius: var(--radius-lg);
+  background: rgba(17, 17, 20, 0.94);
+  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.26);
+}
+
+.streamVaultResultGroup {
+  display: grid;
+  gap: 8px;
+}
+
+.streamVaultResultLabel {
+  color: #f0b23f;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+}
+
+.streamVaultResultRow {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.streamVaultResultRow:hover {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.streamVaultResultRow img,
+.streamVaultResultRow > span {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: rgba(240, 178, 63, 0.12);
+  border: 1px solid rgba(240, 178, 63, 0.2);
+}
+
+.streamVaultResultRow strong,
+.streamVaultResultRow small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.streamVaultResultRow strong {
+  font-size: var(--text-sm);
+}
+
+.streamVaultResultRow small {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.streamVaultTrackRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.streamVaultArtistLink {
+  padding: 8px 10px;
+  border: 1px solid rgba(240, 178, 63, 0.24);
+  border-radius: 999px;
+  color: #f0b23f;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.streamVaultSearchError {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
 .heroCtas {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -535,13 +673,31 @@
     border-radius: 24px;
   }
 
+  .streamVaultSearch {
+    padding: 8px;
+    flex-direction: column;
+    border-radius: 24px;
+  }
+
   .audiusInput,
-  .audiusBtn {
+  .audiusBtn,
+  .streamVaultSearchInput,
+  .streamVaultSearchBtn {
     width: 100%;
   }
 
-  .audiusBtn {
+  .audiusBtn,
+  .streamVaultSearchBtn {
     padding: 12px 18px;
+  }
+
+  .streamVaultTrackRow {
+    grid-template-columns: 1fr;
+  }
+
+  .streamVaultArtistLink {
+    width: fit-content;
+    margin-left: 8px;
   }
 
   .audiusConnectCard,

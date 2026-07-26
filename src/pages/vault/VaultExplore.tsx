@@ -1,19 +1,48 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { arweaveArtistPath } from '../../lib/arweaveArtist';
 import { queryAudioTransactions, queryAudioByTag, aoRecordsToTracks } from '../../lib/arweaveDiscovery';
 import { searchTracksOnAO } from '../../lib/aoMusicRegistry';
 import { TrackCard } from '../../components/TrackCard';
 import type { Track } from '../../context/PlayerContext';
+import { createStreamVaultClient, type StreamVaultTrack } from '../../../packages/streamvault-sdk/src';
 import styles from './Vault.module.css';
+
+type ExploreTrack = Track & { streamVaultProfileId?: string };
+
+function indexedTrackToTrack(track: StreamVaultTrack): ExploreTrack {
+  return {
+    id: track.audioTxId,
+    title: track.title,
+    artist: track.artist,
+    artistId: track.artistId,
+    artwork: track.artworkUrl,
+    streamUrl: track.streamUrl,
+    isPermanent: track.isPermanent,
+    permaTxId: track.audioTxId,
+    assetId: track.assetId,
+    streamVaultProfileId: track.artistId && track.artistId.length === 43 ? track.artistId : undefined,
+  };
+}
 
 export function VaultExplore() {
   const [query, setQuery] = useState('');
   const [tagName, setTagName] = useState('');
   const [tagValue, setTagValue] = useState('');
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const [tracks, setTracks] = useState<ExploreTrack[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
+  const streamVaultIndex = useMemo(() => {
+    const supabaseUrl =
+      import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || '';
+    const supabaseKey =
+      import.meta.env.VITE_STREAMVAULT_INDEX_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+    return supabaseUrl && supabaseKey ? { supabaseUrl, supabaseKey } : undefined;
+  }, []);
+  const streamVaultClient = useMemo(
+    () => createStreamVaultClient({ index: streamVaultIndex }),
+    [streamVaultIndex]
+  );
 
   const handleSearch = async () => {
     setLoading(true);
@@ -21,8 +50,9 @@ export function VaultExplore() {
     setSearched(true);
     try {
       const hasTag = tagName.trim() && tagValue.trim();
-      let gqlTracks: Track[] = [];
-      let aoTracks: Track[] = [];
+      let gqlTracks: ExploreTrack[] = [];
+      let aoTracks: ExploreTrack[] = [];
+      let indexedTracks: ExploreTrack[] = [];
       if (hasTag) {
         gqlTracks = await queryAudioByTag(tagName.trim(), tagValue.trim(), 50);
         const aoRecords = await searchTracksOnAO({ tagName: tagName.trim(), tagValue: tagValue.trim() });
@@ -31,8 +61,12 @@ export function VaultExplore() {
         gqlTracks = await queryAudioTransactions({ limit: 50 });
         const aoRecords = await searchTracksOnAO({});
         aoTracks = aoRecordsToTracks(aoRecords);
+        if (query.trim() && streamVaultIndex) {
+          indexedTracks = (await streamVaultClient.searchTracks({ q: query.trim(), limit: 50 })).map(indexedTrackToTrack);
+        }
       }
-      const byId = new Map<string, Track>();
+      const byId = new Map<string, ExploreTrack>();
+      indexedTracks.forEach((t) => byId.set(t.id, t));
       gqlTracks.forEach((t) => byId.set(t.id, t));
       aoTracks.forEach((t) => {
         if (!byId.has(t.id)) byId.set(t.id, t);
@@ -103,7 +137,13 @@ export function VaultExplore() {
             <TrackCard
               key={track.id}
               track={track}
-              artistHref={track.artistId && track.artistId.length > 20 ? arweaveArtistPath(track.artistId) : undefined}
+              artistHref={
+                track.streamVaultProfileId
+                  ? `/profile/${track.streamVaultProfileId}`
+                  : track.artistId && track.artistId.length > 20
+                    ? arweaveArtistPath(track.artistId)
+                    : undefined
+              }
             />
           ))}
         </section>

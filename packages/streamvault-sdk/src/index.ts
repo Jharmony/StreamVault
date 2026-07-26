@@ -3,6 +3,10 @@ export type StreamVaultSdkOptions = {
   ario?: {
     resolveArNSName(args: { name: string }): Promise<{ txId?: string; processId?: string } | null>;
   };
+  index?: {
+    supabaseUrl?: string;
+    supabaseKey?: string;
+  };
   gatewayUrl?: string;
   gqlUrl?: string;
   aoGatewayUrl?: string;
@@ -77,6 +81,9 @@ export type MarketplaceListing = {
   orderbookId: string | null;
   asks: UcmActiveOrder[];
 };
+
+export type SearchProfilesArgs = { q: string; limit?: number };
+export type SearchTracksArgs = { q?: string; handle?: string; walletAddress?: string; profileId?: string; limit?: number };
 
 type AtomicAssetDisplayMetadata = {
   title?: string;
@@ -187,6 +194,69 @@ async function gql(endpoint: string, query: string, variables: Record<string, un
   });
   if (!res.ok) throw new Error(`GraphQL request failed: HTTP ${res.status}`);
   return res.json();
+}
+
+function normalizeHandle(handle: string): string {
+  return String(handle || '').trim().replace(/^@+/, '').toLowerCase();
+}
+
+function encodeSupabaseValue(value: string): string {
+  return encodeURIComponent(String(value || '').replace(/"/g, '\\"'));
+}
+
+async function supabaseSelect<T>(
+  index: { supabaseUrl?: string; supabaseKey?: string } | undefined,
+  table: string,
+  query: string
+): Promise<T[]> {
+  const url = String(index?.supabaseUrl || '').trim().replace(/\/+$/, '');
+  const key = String(index?.supabaseKey || '').trim();
+  if (!url || !key) return [];
+  const res = await fetch(`${url}/rest/v1/${table}${query}`, {
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      Accept: 'application/json',
+    },
+  }).catch(() => null);
+  if (!res?.ok) return [];
+  const json = await res.json().catch(() => null);
+  return Array.isArray(json) ? json : [];
+}
+
+function indexProfileToProfile(row: any): StreamVaultProfile | null {
+  if (!row?.profile_id) return null;
+  return {
+    id: String(row.profile_id),
+    walletAddress: pickString(row.wallet_address),
+    displayName: pickString(row.display_name),
+    handle: pickString(row.handle),
+    bio: pickString(row.bio),
+    avatarUrl: pickString(row.avatar_url),
+    bannerUrl: pickString(row.banner_url),
+    assets: [],
+    raw: row.raw || row,
+  };
+}
+
+function indexTrackToTrack(row: any): StreamVaultTrack | null {
+  const audioTxId = pickString(row?.audio_tx_id);
+  if (!audioTxId) return null;
+  const urls = Array.isArray(row.stream_urls) && row.stream_urls.length ? row.stream_urls : publicDataUrls(audioTxId);
+  return {
+    id: pickString(row.id) || audioTxId,
+    audioTxId,
+    title: pickString(row.title) || 'Untitled',
+    artist: pickString(row.artist) || 'Unknown artist',
+    artistId: pickString(row.profile_id) || pickString(row.owner_wallet) || audioTxId,
+    streamUrl: pickString(row.stream_url) || urls[0],
+    streamUrls: urls,
+    artworkUrl: pickString(row.artwork_url) || undefined,
+    assetId: pickString(row.asset_id) || undefined,
+    isPermanent: row.is_permanent !== false,
+    source: 'arweave',
+    raw: row.raw || row,
+  };
 }
 
 function tagValue(tags: Array<{ name?: string; value?: string }> | undefined, names: string[]): string | null {
@@ -312,6 +382,7 @@ async function findAudioTxIdForAtomicAsset(assetId: string, endpoint: string): P
 export function createStreamVaultClient(options: StreamVaultSdkOptions = {}) {
   const permaweb = options.permaweb || null;
   const ario = options.ario || undefined;
+  const index = options.index;
   const l1Gql = options.gqlUrl || DEFAULT_L1_GQL;
   const aoGateway = options.aoGatewayUrl || DEFAULT_AO_GQL_GATEWAY;
   const hbNodes = options.hbReadNodes || DEFAULT_HB_NODES;
@@ -319,6 +390,13 @@ export function createStreamVaultClient(options: StreamVaultSdkOptions = {}) {
   return {
     async getProfileById(profileId: string): Promise<StreamVaultProfile | null> {
       const id = String(profileId || '').trim();
+      const [indexed] = await supabaseSelect<any>(
+        index,
+        'profiles',
+        `?profile_id=eq.${encodeSupabaseValue(id)}&select=*&limit=1`
+      );
+      const indexedProfile = indexProfileToProfile(indexed);
+      if (indexedProfile) return indexedProfile;
       if (!permaweb || !id) return null;
       const profile = await permaweb.getProfileById(id).catch(() => null);
       return profile?.id ? toProfile(profile) : null;
@@ -326,6 +404,13 @@ export function createStreamVaultClient(options: StreamVaultSdkOptions = {}) {
 
     async getProfileByWallet(walletAddress: string): Promise<StreamVaultProfile | null> {
       const wallet = String(walletAddress || '').trim();
+      const [indexed] = await supabaseSelect<any>(
+        index,
+        'profiles',
+        `?wallet_address=eq.${encodeSupabaseValue(wallet)}&select=*&order=indexed_at.desc&limit=1`
+      );
+      const indexedProfile = indexProfileToProfile(indexed);
+      if (indexedProfile) return indexedProfile;
       if (!permaweb || !wallet) return null;
       if (permaweb.getProfileByWalletAddress) {
         const direct = await permaweb.getProfileByWalletAddress(wallet).catch(() => null);
@@ -349,8 +434,29 @@ export function createStreamVaultClient(options: StreamVaultSdkOptions = {}) {
       return null;
     },
 
-    async getProfileByHandle(_handle: string): Promise<StreamVaultProfile | null> {
-      return null;
+    async getProfileByHandle(handle: string): Promise<StreamVaultProfile | null> {
+      const normalized = normalizeHandle(handle);
+      if (!normalized) return null;
+      const [indexed] = await supabaseSelect<any>(
+        index,
+        'profiles',
+        `?handle_normalized=eq.${encodeSupabaseValue(normalized)}&select=*&limit=1`
+      );
+      return indexProfileToProfile(indexed);
+    },
+
+    async searchProfiles(args: SearchProfilesArgs): Promise<StreamVaultProfile[]> {
+      const q = String(args?.q || '').trim();
+      if (!q) return [];
+      const limit = normalizeLimit(args?.limit, 20);
+      const rows = await supabaseSelect<any>(
+        index,
+        'profiles',
+        `?or=(handle_normalized.ilike.*${encodeSupabaseValue(normalizeHandle(q))}*,display_name.ilike.*${encodeSupabaseValue(
+          q
+        )}*)&select=*&order=indexed_at.desc&limit=${limit}`
+      );
+      return rows.map(indexProfileToProfile).filter(Boolean) as StreamVaultProfile[];
     },
 
     async resolveArNSProfile(name: string): Promise<StreamVaultProfile | null> {
@@ -382,6 +488,13 @@ export function createStreamVaultClient(options: StreamVaultSdkOptions = {}) {
       const wallet = String(walletAddress || '').trim();
       if (!wallet) return [];
       const limit = normalizeLimit(args?.limit, 50);
+      const indexed = await supabaseSelect<any>(
+        index,
+        'tracks',
+        `?owner_wallet=eq.${encodeSupabaseValue(wallet)}&select=*&order=created_at.desc.nullslast&limit=${limit}`
+      );
+      const indexedTracks = indexed.map(indexTrackToTrack).filter(Boolean) as StreamVaultTrack[];
+      if (indexedTracks.length > 0) return indexedTracks;
       const json = await gql(
         l1Gql,
         `query StreamVaultAudioByOwner($tags: [TagFilter!]!, $owners: [String!], $first: Int!) {
@@ -403,6 +516,15 @@ export function createStreamVaultClient(options: StreamVaultSdkOptions = {}) {
 
     async getTracksByProfile(profile: StreamVaultProfile, args?: { limit?: number }): Promise<StreamVaultTrack[]> {
       const limit = normalizeLimit(args?.limit, 50);
+      if (profile.id) {
+        const indexed = await supabaseSelect<any>(
+          index,
+          'tracks',
+          `?profile_id=eq.${encodeSupabaseValue(profile.id)}&select=*&order=created_at.desc.nullslast&limit=${limit}`
+        );
+        const indexedTracks = indexed.map(indexTrackToTrack).filter(Boolean) as StreamVaultTrack[];
+        if (indexedTracks.length > 0) return indexedTracks;
+      }
       const fallbackArtist = profile.displayName || profile.handle || profile.walletAddress || '';
       const [walletTracks, assetTracks] = await Promise.all([
         profile.walletAddress ? this.getTracksByWallet(profile.walletAddress, { limit }) : Promise.resolve([]),
@@ -421,8 +543,44 @@ export function createStreamVaultClient(options: StreamVaultSdkOptions = {}) {
       return mergeTracks(walletTracks, assetTracks.filter(Boolean) as StreamVaultTrack[]).slice(0, limit);
     },
 
+    async getTracksByProfileId(profileId: string, args?: { limit?: number }): Promise<StreamVaultTrack[]> {
+      const profile = await this.getProfileById(profileId);
+      if (!profile) return [];
+      return this.getTracksByProfile(profile, args);
+    },
+
+    async getTracksByHandle(handle: string, args?: { limit?: number }): Promise<StreamVaultTrack[]> {
+      const profile = await this.getProfileByHandle(handle);
+      if (!profile) return [];
+      return this.getTracksByProfile(profile, args);
+    },
+
+    async searchTracks(args: SearchTracksArgs): Promise<StreamVaultTrack[]> {
+      const limit = normalizeLimit(args?.limit, 20);
+      if (args?.handle) return this.getTracksByHandle(args.handle, { limit });
+      if (args?.profileId) return this.getTracksByProfileId(args.profileId, { limit });
+      if (args?.walletAddress) return this.getTracksByWallet(args.walletAddress, { limit });
+      const q = String(args?.q || '').trim();
+      if (!q) return [];
+      const rows = await supabaseSelect<any>(
+        index,
+        'tracks',
+        `?or=(title.ilike.*${encodeSupabaseValue(q)}*,artist.ilike.*${encodeSupabaseValue(
+          q
+        )}*)&select=*&order=created_at.desc.nullslast&limit=${limit}`
+      );
+      return rows.map(indexTrackToTrack).filter(Boolean) as StreamVaultTrack[];
+    },
+
     async getTrendingTracks(args?: { limit?: number }): Promise<StreamVaultTrack[]> {
       const limit = normalizeLimit(args?.limit, 24);
+      const indexed = await supabaseSelect<any>(
+        index,
+        'tracks',
+        `?select=*&order=created_at.desc.nullslast&limit=${limit}`
+      );
+      const indexedTracks = indexed.map(indexTrackToTrack).filter(Boolean) as StreamVaultTrack[];
+      if (indexedTracks.length > 0) return indexedTracks;
       const json = await gql(
         l1Gql,
         `query StreamVaultAudio($tags: [TagFilter!]!, $first: Int!) {
