@@ -286,7 +286,7 @@ const tracks = result.profile
       <section className={styles.panel}>
         <div className={styles.sectionTitleRow}>
           <h2>Production Install</h2>
-          <span>0.0.1-alpha.5</span>
+          <span>0.0.1-alpha.6</span>
         </div>
         <div className={styles.packageBar}>
           <div>

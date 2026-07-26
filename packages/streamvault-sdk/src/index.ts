@@ -229,6 +229,14 @@ function normalizeIndexUrl(indexUrl: string | undefined): string {
   return String(indexUrl || '').trim().replace(/\/+$/, '');
 }
 
+function getUrlBase(): string | undefined {
+  if (typeof globalThis !== 'undefined') {
+    const origin = (globalThis as any).location?.origin;
+    if (typeof origin === 'string' && origin) return origin;
+  }
+  return undefined;
+}
+
 async function indexApiGet<T>(
   indexUrl: string | undefined,
   path: string,
@@ -236,7 +244,10 @@ async function indexApiGet<T>(
 ): Promise<T | null> {
   const base = normalizeIndexUrl(indexUrl);
   if (!base) return null;
-  const url = new URL(`${base}${path.startsWith('/') ? path : `/${path}`}`);
+  const target = `${base}${path.startsWith('/') ? path : `/${path}`}`;
+  const urlBase = /^https?:\/\//i.test(target) ? undefined : getUrlBase();
+  if (!urlBase && !/^https?:\/\//i.test(target)) return null;
+  const url = new URL(target, urlBase);
   for (const [key, value] of Object.entries(params || {})) {
     if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
   }
