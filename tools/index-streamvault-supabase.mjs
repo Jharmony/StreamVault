@@ -375,16 +375,16 @@ async function upsertRows({ url, key, table, rows, onConflict }) {
   });
 }
 
-async function main() {
-  loadEnvFile();
-  const supabaseUrl = getEnv('SUPABASE_URL', 'VITE_SUPABASE_URL');
-  const serviceKey = getEnv('SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEY');
+export async function runStreamVaultSupabaseIndexer(options = {}) {
+  if (options.loadEnv !== false) loadEnvFile();
+  const supabaseUrl = options.supabaseUrl || getEnv('SUPABASE_URL', 'VITE_SUPABASE_URL');
+  const serviceKey = options.serviceKey || getEnv('SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEY');
   if (!supabaseUrl || !serviceKey) {
     throw new Error('Missing SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local');
   }
 
-  const limit = normalizeLimit(process.env.STREAMVAULT_INDEX_LIMIT || process.argv[2]);
-  const arweaveGqlEndpoints = (process.env.STREAMVAULT_ARWEAVE_GQL_URLS || '')
+  const limit = normalizeLimit(options.limit || process.env.STREAMVAULT_INDEX_LIMIT || process.argv[2]);
+  const arweaveGqlEndpoints = (options.arweaveGqlUrls || process.env.STREAMVAULT_ARWEAVE_GQL_URLS || '')
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
@@ -397,9 +397,9 @@ async function main() {
   );
   const profilesByWallet = await fetchProfilesForWallets(
     wallets,
-    process.env.STREAMVAULT_AO_GQL_URL || DEFAULT_AO_GQL_ENDPOINT
+    options.aoGqlUrl || process.env.STREAMVAULT_AO_GQL_URL || DEFAULT_AO_GQL_ENDPOINT
   );
-  const hbNodes = (process.env.STREAMVAULT_HB_NODES || '')
+  const hbNodes = (options.hbNodes || process.env.STREAMVAULT_HB_NODES || '')
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
@@ -452,18 +452,12 @@ async function main() {
         },
       });
     }
-    console.log(
-      JSON.stringify(
-        {
-          status: 'ok',
-          profilesUpserted: profileRows.length,
-          tracksUpserted: trackRows.length,
-          walletsFound: wallets.length,
-        },
-        null,
-        2
-      )
-    );
+    return {
+      status: 'ok',
+      profilesUpserted: profileRows.length,
+      tracksUpserted: trackRows.length,
+      walletsFound: wallets.length,
+    };
   } catch (error) {
     if (runId) {
       await supabaseRequest({
@@ -483,7 +477,14 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error?.message || error);
-  process.exit(1);
-});
+async function main() {
+  const result = await runStreamVaultSupabaseIndexer();
+  console.log(JSON.stringify(result, null, 2));
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(error?.message || error);
+    process.exit(1);
+  });
+}
