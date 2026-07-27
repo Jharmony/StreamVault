@@ -21,7 +21,9 @@ import {
   getDefaultUcmQuoteToken,
   getUcmQuoteTokens,
   getUcmQuoteToken,
+  getUcmQuoteTokenLogoUrl,
   rememberPreferredUcmQuoteTokenId,
+  resolveUcmQuoteTokenLogoUrl,
   resolveInitialUcmQuoteToken,
   tokenDisplayToBaseUnits,
   type UcmQuoteToken,
@@ -87,6 +89,9 @@ export function ListOnUcm({
   const [ordersTimedOut, setOrdersTimedOut] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [marketRefreshKey, setMarketRefreshKey] = useState(0);
+  const [quoteTokenMenuOpen, setQuoteTokenMenuOpen] = useState(false);
+  const [quoteTokenLogoUrls, setQuoteTokenLogoUrls] = useState<Record<string, string | null>>({});
+  const [brokenQuoteTokenLogos, setBrokenQuoteTokenLogos] = useState<Set<string>>(() => new Set());
   const [knownOrderbookId, setKnownOrderbookId] = useState<string | null>(() =>
     getCachedAssetOrderbookId(assetId)
   );
@@ -100,7 +105,55 @@ export function ListOnUcm({
     const next = getUcmQuoteToken(tokenId) || getDefaultUcmQuoteToken();
     setSelectedQuoteToken(next);
     rememberPreferredUcmQuoteTokenId(next.id);
+    setQuoteTokenMenuOpen(false);
   }, []);
+
+  const markQuoteTokenLogoBroken = useCallback((tokenId: string) => {
+    setBrokenQuoteTokenLogos((current) => {
+      const next = new Set(current);
+      next.add(tokenId);
+      return next;
+    });
+  }, []);
+
+  const renderQuoteTokenLogo = useCallback(
+    (token: UcmQuoteToken) => {
+      const resolvedLogoUrl = quoteTokenLogoUrls[token.id] ?? getUcmQuoteTokenLogoUrl(token);
+      const logoUrl = brokenQuoteTokenLogos.has(token.id) ? null : resolvedLogoUrl;
+      return logoUrl ? (
+        <img
+          src={logoUrl}
+          alt=""
+          className={styles.tokenLogo}
+          loading="lazy"
+          onError={() => markQuoteTokenLogoBroken(token.id)}
+        />
+      ) : (
+        <span className={styles.tokenFallback}>{token.symbol.slice(0, 2)}</span>
+      );
+    },
+    [brokenQuoteTokenLogos, markQuoteTokenLogoBroken, quoteTokenLogoUrls]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      quoteTokens.map(async (token) => {
+        const logoUrl = await resolveUcmQuoteTokenLogoUrl(libs, token);
+        return [token.id, logoUrl] as const;
+      })
+    )
+      .then((entries) => {
+        if (cancelled) return;
+        setQuoteTokenLogoUrls(Object.fromEntries(entries));
+      })
+      .catch(() => {
+        // Registry logos still render through getUcmQuoteTokenLogoUrl.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [libs, quoteTokens]);
 
   const canShowListingPanel = useMemo(() => {
     if (assumeOwner) return true;
@@ -605,22 +658,50 @@ export function ListOnUcm({
         </div>
       ) : null}
 
-      <label className={styles.label}>
+      <div className={styles.label}>
         Market token
-        <select
-          className={styles.input}
-          value={selectedQuoteToken.id}
-          onChange={(e) => handleQuoteTokenChange(e.target.value)}
-          disabled={isListing || quoteTokens.length === 0}
-          aria-label="UCM market token"
-        >
-          {quoteTokens.map((token) => (
-            <option key={token.id} value={token.id}>
-              {token.symbol} — {token.name}
-            </option>
-          ))}
-        </select>
-      </label>
+        <div className={styles.tokenSelect}>
+          <button
+            type="button"
+            className={styles.tokenSelectButton}
+            onClick={() => setQuoteTokenMenuOpen((open) => !open)}
+            disabled={isListing || quoteTokens.length === 0}
+            aria-haspopup="listbox"
+            aria-expanded={quoteTokenMenuOpen}
+          >
+            {renderQuoteTokenLogo(selectedQuoteToken)}
+            <span className={styles.tokenText}>
+              <strong>{selectedQuoteToken.symbol}</strong>
+              <span>{selectedQuoteToken.name}</span>
+            </span>
+            <span className={styles.tokenChevron} aria-hidden="true">⌄</span>
+          </button>
+          {quoteTokenMenuOpen ? (
+            <div className={styles.tokenMenu} role="listbox" aria-label="UCM market token">
+              {quoteTokens.map((token) => {
+                const active = selectedQuoteToken.id === token.id;
+                return (
+                  <button
+                    key={token.id}
+                    type="button"
+                    className={`${styles.tokenMenuItem} ${active ? styles.tokenMenuItemActive : ''}`}
+                    onClick={() => handleQuoteTokenChange(token.id)}
+                    disabled={isListing}
+                    role="option"
+                    aria-selected={active}
+                  >
+                    {renderQuoteTokenLogo(token)}
+                    <span className={styles.tokenText}>
+                      <strong>{token.symbol}</strong>
+                      <span>{token.name}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      </div>
 
       <div className={compact ? styles.formRow : undefined}>
         <label className={styles.label}>

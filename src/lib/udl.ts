@@ -19,6 +19,8 @@ export interface UdlConfig {
   fee: string;
   /** Currency code, e.g. 'U', 'MATIC', 'USDC.base', 'AR' */
   currency: string;
+  /** Primary address that receives license fees. Detailed splits are mirrored in Royalties-Splits. */
+  paymentAddress?: string;
   /** How often the fee applies (per-stream, per-download, etc.) */
   interval: UdlInterval;
   /** Whether attribution is required when using the work */
@@ -50,8 +52,8 @@ export function udlConfigToTags(udl: UdlConfig): { name: string; value: string }
     { name: 'License-Fee', value: udl.fee },
     { name: 'License-Fee-Unit', value: udl.interval },
     { name: 'License-Currency', value: udl.currency },
+    ...(udl.paymentAddress ? [{ name: 'License-Fee-Recipient', value: udl.paymentAddress }] : []),
     ...(udl.attribution ? [{ name: 'License-Attribution', value: udl.attribution }] : []),
     ...(udl.jurisdiction ? [{ name: 'License-Jurisdiction', value: udl.jurisdiction }] : []),
   ];
 }
-

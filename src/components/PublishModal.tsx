@@ -26,6 +26,15 @@ interface PublishModalProps {
 }
 
 export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
+  type PublishMode = 'regular' | 'atomic';
+  type SplitDraft = {
+    id: string;
+    address: string;
+    percent: string;
+    chain: RoyaltySplit['chain'];
+    token: string;
+  };
+
   const { libs, getWritableLibs } = usePermaweb();
   const { address, walletType, connect, isConnecting } = useWallet();
   const {
@@ -83,14 +92,17 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
   const [costEstimateError, setCostEstimateError] = useState<string | null>(null);
   /** When publishing full tier from an Audius-backed track, download bytes from streamUrl (CORS permitting). */
   const [useAudiusStreamForFull, setUseAudiusStreamForFull] = useState(isAudiusBackedTrack);
-  /** Experimental: permaweb-libs createAtomicAsset can break with HyperBEAM/system changes. Default off. */
-  const [createAtomicAssetExperimental, setCreateAtomicAssetExperimental] = useState(false);
+  const [publishMode, setPublishMode] = useState<PublishMode | null>(null);
+  const createAtomicAssetExperimental = publishMode === 'atomic';
 
   // Simple UDL controls
   const [licenseUsePreset, setLicenseUsePreset] = useState<'stream' | 'stream-download' | 'stream-download-commercial'>('stream');
   const [aiUse, setAiUse] = useState<UdlAiUse>('deny');
   const [licenseFee, setLicenseFee] = useState<string>('0');
   const [licenseCurrency, setLicenseCurrency] = useState<string>('MATIC');
+  const [splitDrafts, setSplitDrafts] = useState<SplitDraft[]>([
+    { id: 'primary', address: '', percent: '100', chain: 'arweave', token: 'AR' },
+  ]);
 
   // New states for global upload where track is undefined
   const [customTitle, setCustomTitle] = useState(track?.title || '');
@@ -167,6 +179,51 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
     },
     []
   );
+
+  const defaultPayoutForPayment = useCallback((): Pick<SplitDraft, 'chain' | 'token'> => {
+    if (useTurbo) {
+      if (turboToken === 'base-eth' || turboToken === 'base-usdc' || turboToken === 'base-ario') {
+        return { chain: 'base', token: turboToken === 'base-eth' ? 'ETH' : turboToken === 'base-usdc' ? 'USDC' : 'ARIO' };
+      }
+      if (turboToken === 'polygon-usdc' || turboToken === 'pol') {
+        return { chain: 'polygon', token: turboToken === 'polygon-usdc' ? 'USDC' : 'POL' };
+      }
+      if (turboToken === 'solana') return { chain: 'solana', token: 'SOL' };
+      return { chain: 'arweave', token: 'AR' };
+    }
+    if (walletType === 'ethereum') return { chain: 'ethereum', token: 'ETH' };
+    if (walletType === 'solana') return { chain: 'solana', token: 'SOL' };
+    return { chain: 'arweave', token: 'AR' };
+  }, [turboToken, useTurbo, walletType]);
+
+  const updateSplitDraft = useCallback((id: string, patch: Partial<SplitDraft>) => {
+    setSplitDrafts((current) => current.map((split) => (split.id === id ? { ...split, ...patch } : split)));
+  }, []);
+
+  const addSplitDraft = useCallback(() => {
+    const payout = defaultPayoutForPayment();
+    setSplitDrafts((current) => [
+      ...current,
+      { id: `split-${Date.now()}`, address: '', percent: '0', ...payout },
+    ]);
+  }, [defaultPayoutForPayment]);
+
+  const removeSplitDraft = useCallback((id: string) => {
+    setSplitDrafts((current) => (current.length <= 1 ? current : current.filter((split) => split.id !== id)));
+  }, []);
+
+  useEffect(() => {
+    if (!address) return;
+    setSplitDrafts((current) => {
+      if (!current.length) {
+        const payout = defaultPayoutForPayment();
+        return [{ id: 'primary', address, percent: '100', ...payout }];
+      }
+      if (current[0].address) return current;
+      const payout = defaultPayoutForPayment();
+      return [{ ...current[0], address, ...payout }, ...current.slice(1)];
+    });
+  }, [address, defaultPayoutForPayment]);
 
   useEffect(() => {
     let cancelled = false;
@@ -284,7 +341,7 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
     window.open('https://prices.ardrive.io/', '_blank', 'noopener,noreferrer');
   };
 
-  const buildUdlConfig = (): UdlConfig => {
+  const buildUdlConfig = (paymentAddress?: string): UdlConfig => {
     const usage =
       licenseUsePreset === 'stream'
         ? ['stream']
@@ -301,47 +358,54 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
       aiUse,
       fee,
       currency: licenseCurrency || 'MATIC',
+      paymentAddress,
       interval: 'per-stream',
       attribution: 'required',
     };
   };
 
-  const buildDefaultSplits = (): RoyaltySplit[] => {
-    if (!address) return [];
-    let chain: RoyaltySplit['chain'] = 'arweave';
-    let token = 'AR';
+  const normalizedSplits = useMemo(() => {
+    return splitDrafts
+      .map((split) => {
+        const percent = Number(split.percent);
+        return {
+          ...split,
+          address: split.address.trim(),
+          token: split.token.trim() || licenseCurrency || 'AR',
+          shareBps: Number.isFinite(percent) ? Math.round(percent * 100) : 0,
+        };
+      })
+      .filter((split) => split.address && split.shareBps > 0);
+  }, [licenseCurrency, splitDrafts]);
 
-    if (useTurbo) {
-      if (turboToken === 'base-eth' || turboToken === 'base-usdc' || turboToken === 'base-ario') {
-        chain = 'base';
-        token = turboToken === 'base-eth' ? 'ETH' : turboToken === 'base-usdc' ? 'USDC' : 'ARIO';
-      } else if (turboToken === 'polygon-usdc' || turboToken === 'pol') {
-        chain = 'polygon';
-        token = turboToken === 'polygon-usdc' ? 'USDC' : 'POL';
-      } else if (turboToken === 'solana') {
-        chain = 'solana';
-        token = 'SOL';
-      }
-    } else if (walletType === 'ethereum') {
-      chain = 'ethereum';
-      token = 'ETH';
-    } else if (walletType === 'solana') {
-      chain = 'solana';
-      token = 'SOL';
+  const splitTotalBps = useMemo(
+    () => normalizedSplits.reduce((sum, split) => sum + split.shareBps, 0),
+    [normalizedSplits]
+  );
+
+  const buildRoyaltySplits = (): RoyaltySplit[] => {
+    if (normalizedSplits.length === 0) {
+      if (!address) return [];
+      const payout = defaultPayoutForPayment();
+      return [{ address, shareBps: 10_000, ...payout }];
     }
-
-    return [
-      {
-        address,
-        shareBps: 10_000,
-        chain,
-        token,
-      },
-    ];
+    if (splitTotalBps !== 10_000) {
+      throw new Error('License payout splits must total exactly 100%.');
+    }
+    return normalizedSplits.map((split) => ({
+      address: split.address,
+      shareBps: split.shareBps,
+      chain: split.chain,
+      token: split.token,
+    }));
   };
 
   const handlePublish = async () => {
     if (isSubmittingRef.current) return;
+    if (!publishMode) {
+      setErrorMessage('Choose regular upload or atomic asset first.');
+      return;
+    }
     if (!address || !walletType || !libs) {
       // Show inline wallet chooser instead of a plain error
       setShowWalletChooser(true);
@@ -423,8 +487,8 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
         isSubmittingRef.current = false;
         return;
       }
-      const udlConfig = buildUdlConfig();
-      const splits = buildDefaultSplits();
+      const splits = buildRoyaltySplits();
+      const udlConfig = buildUdlConfig(splits[0]?.address);
       const skipAtomicAsset = !createAtomicAssetExperimental;
 
       // Audius-backed tracks: upload cover from track metadata unless the user picked a local file.
@@ -631,6 +695,7 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
 
   const primaryButtonLabel = useMemo(() => {
     if (status === 'done') return 'Done';
+    if (!publishMode) return 'Choose upload type';
     if (!address) return 'Connect wallet to upload';
     if (publishStage === 'preparing') return 'Preparing…';
     if (publishStage === 'uploading-cover' || publishStage === 'uploading-audio') return 'Uploading…';
@@ -645,22 +710,91 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
     }
     if (isBusy) return 'Working…';
     return createAtomicAssetExperimental ? 'Publish + mint atomic asset' : 'Publish track';
-  }, [address, createAtomicAssetExperimental, isBusy, publishStage, status]);
+  }, [address, createAtomicAssetExperimental, isBusy, publishMode, publishStage, status]);
 
   const txIdToShow = result?.txId || currentTxId;
   const permawebUrlToShow = result?.permawebUrl || (txIdToShow ? arweaveTxDataUrl(txIdToShow) : null);
 
   return (
     <div className={styles.overlay} onClick={handleClose}>
-      <div className={styles.modal + ' glass-strong'} onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`${styles.modal} ${!publishMode ? styles.choiceModal : ''} glass-strong`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className={styles.header}>
-          <h2>Upload to Arweave</h2>
+          <h2>{publishMode ? 'Upload to Arweave' : 'What would you like to do?'}</h2>
           <button type="button" className={styles.close} onClick={handleClose} aria-label="Close">×</button>
         </div>
         <p className={styles.subtitle}>
-          Add your audio, choose a payment method, then publish. Open <strong>Advanced</strong> for license (UDL), cover art,
-          royalties, and other networks/tokens.
+          {publishMode
+            ? 'Add your audio, choose a payment method, then publish.'
+            : 'Choose the best permanent publishing path for your content.'}
         </p>
+        {!publishMode ? (
+          <>
+        <div className={styles.modeChoiceGrid} aria-label="Choose upload type">
+          <button
+            type="button"
+            className={`${styles.modeChoiceCard} ${publishMode === 'regular' ? styles.modeChoiceCardActive : ''}`}
+            onClick={() => setPublishMode('regular')}
+          >
+            <span className={`${styles.modeIllustration} ${styles.modeIllustrationUpload}`} aria-hidden="true">
+              <img src="/upload-choice-assets/upload-to-arweave.png" alt="" />
+            </span>
+            <span className={styles.modeCopy}>
+              <strong>Upload to Arweave</strong>
+              <span>Upload audio to Arweave and add tags, cover art, and UDL metadata.</span>
+            </span>
+            <span className={styles.modeFeatureRow}>
+              <span>Any audio</span>
+              <span>Add tags</span>
+              <span>UDL</span>
+              <span>Cover art</span>
+            </span>
+            <span className={`${styles.modeCta} ${styles.modeCtaUpload}`}>Choose upload</span>
+          </button>
+          <button
+            type="button"
+            className={`${styles.modeChoiceCard} ${publishMode === 'atomic' ? styles.modeChoiceCardActive : ''}`}
+            onClick={() => {
+              setPublishMode('atomic');
+              setShowAdvanced(true);
+            }}
+          >
+            <span className={styles.experimentalRibbon}>Experimental</span>
+            <span className={`${styles.modeIllustration} ${styles.modeIllustrationAtomic}`} aria-hidden="true">
+              <img src="/upload-choice-assets/create-atomic-asset.png" alt="" />
+            </span>
+            <span className={styles.modeCopy}>
+              <strong>Create Atomic Asset</strong>
+              <span>Create an atomic asset with song file, AO process, metadata, UDL, and cover art.</span>
+            </span>
+            <span className={styles.modeFeatureRow}>
+              <span>Song file</span>
+              <span>AO process</span>
+              <span>Metadata</span>
+              <span>UDL</span>
+              <span>Cover art</span>
+            </span>
+            <span className={`${styles.modeCta} ${styles.modeCtaAtomic}`}>Create atomic asset</span>
+          </button>
+        </div>
+          <p className={styles.modeFooterNote}>All uploads are permanently stored on Arweave.</p>
+        </>
+        ) : (
+          <div className={styles.modeSummary}>
+            <span className={styles.modeSummaryBadge}>{publishMode === 'atomic' ? 'Atomic asset' : 'Regular upload'}</span>
+            <span>
+              {publishMode === 'atomic'
+                ? 'Minting path selected: song file, cover art, metadata, UDL, and AO asset process.'
+                : 'Arweave upload selected: audio, cover art, tags, and UDL metadata.'}
+            </span>
+            <button type="button" onClick={() => setPublishMode(null)}>Change</button>
+          </div>
+        )}
+
+        {publishMode ? (
+          <>
         <div className={styles.audiusCtaBox}>
           <div className={styles.audiusCtaText}>
             <strong>{audiusUser ? `Audius connected — @${audiusUser.handle}` : 'Connect Audius'}</strong>
@@ -967,18 +1101,6 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
                   </span>
                 </label>
               )}
-              <label className={styles.checkLabel}>
-                <input
-                  type="checkbox"
-                  checked={createAtomicAssetExperimental}
-                  onChange={(e) => setCreateAtomicAssetExperimental(e.target.checked)}
-                />
-                <span>
-                  Create atomic asset (experimental) — only when checked does StreamVault call{' '}
-                  <code>createAtomicAsset</code> (AO mint). Leave unchecked for a regular Arweave data upload with UDL
-                  tags only (recommended).
-                </span>
-              </label>
               {!createAtomicAssetExperimental && (
                 <p className={styles.hint}>
                   Publishing mode: regular track upload (no atomic mint).
@@ -989,17 +1111,94 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
                   Publishing mode: experimental atomic asset mint after the audio upload.
                 </p>
               )}
-              <label className={styles.label}>
-                Royalties (bps)
-                <input
-                  className={styles.input}
-                  type="number"
-                  min={0}
-                  max={5000}
-                  value={royaltiesBps}
-                  onChange={(e) => setRoyaltiesBps(Number(e.target.value))}
-                />
-              </label>
+              <div className={styles.splitBlock}>
+                <div className={styles.splitHeader}>
+                  <div>
+                    <p className={styles.licenseTitle}>License payout / splits</p>
+                    <p className={styles.hint}>
+                      Used for UDL license fee recipient tags and mirrored as <code>Royalties-Splits</code>.
+                    </p>
+                  </div>
+                  <span className={splitTotalBps === 10_000 ? styles.splitTotalOk : styles.splitTotalWarn}>
+                    {(splitTotalBps / 100).toFixed(2).replace(/\.00$/, '')}%
+                  </span>
+                </div>
+                {splitDrafts.map((split, index) => (
+                  <div className={styles.splitRow} key={split.id}>
+                    <label className={styles.label}>
+                      Recipient {index + 1}
+                      <input
+                        className={styles.input}
+                        value={split.address}
+                        onChange={(e) => updateSplitDraft(split.id, { address: e.target.value })}
+                        placeholder="Wallet or payout address"
+                      />
+                    </label>
+                    <div className={styles.splitMiniRow}>
+                      <label className={styles.label}>
+                        %
+                        <input
+                          className={styles.input}
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.01}
+                          value={split.percent}
+                          onChange={(e) => updateSplitDraft(split.id, { percent: e.target.value })}
+                        />
+                      </label>
+                      <label className={styles.label}>
+                        Chain
+                        <select
+                          className={styles.select}
+                          value={split.chain}
+                          onChange={(e) => updateSplitDraft(split.id, { chain: e.target.value as RoyaltySplit['chain'] })}
+                        >
+                          <option value="arweave">Arweave</option>
+                          <option value="base">Base</option>
+                          <option value="polygon">Polygon</option>
+                          <option value="ethereum">Ethereum</option>
+                          <option value="solana">Solana</option>
+                        </select>
+                      </label>
+                      <label className={styles.label}>
+                        Token
+                        <input
+                          className={styles.input}
+                          value={split.token}
+                          onChange={(e) => updateSplitDraft(split.id, { token: e.target.value })}
+                          placeholder="AR, U, USDC"
+                        />
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      className={styles.removeSplitBtn}
+                      onClick={() => removeSplitDraft(split.id)}
+                      disabled={splitDrafts.length <= 1}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <button type="button" className={styles.addSplitBtn} onClick={addSplitDraft}>
+                  Add recipient
+                </button>
+                {splitTotalBps !== 10_000 && normalizedSplits.length > 0 ? (
+                  <p className={styles.fieldError}>Payout splits must total exactly 100% before publishing.</p>
+                ) : null}
+                <label className={styles.label}>
+                  Secondary sale royalty (bps)
+                  <input
+                    className={styles.input}
+                    type="number"
+                    min={0}
+                    max={5000}
+                    value={royaltiesBps}
+                    onChange={(e) => setRoyaltiesBps(Number(e.target.value))}
+                  />
+                </label>
+              </div>
 
               {useTurbo && (
                 <label className={styles.label}>
@@ -1034,6 +1233,8 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
             </div>
           )}
         </div>
+          </>
+        ) : null}
 
         {status === 'done' && result?.success && (
           <div className={styles.success}>
@@ -1247,17 +1448,19 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
           </div>
         )}
 
-        <div className={styles.actions}>
-          <button type="button" className={styles.cancelBtn} onClick={handleClose}>Cancel</button>
-          <button
-            type="button"
-            className={`${styles.publishBtn} ${styles.publishBtnWide}`}
-            onClick={handlePublish}
-            disabled={isBusy || isConnecting || status === 'done'}
-          >
-            {primaryButtonLabel}
-          </button>
-        </div>
+        {publishMode ? (
+          <div className={styles.actions}>
+            <button type="button" className={styles.cancelBtn} onClick={handleClose}>Cancel</button>
+            <button
+              type="button"
+              className={`${styles.publishBtn} ${styles.publishBtnWide}`}
+              onClick={handlePublish}
+              disabled={isBusy || isConnecting || status === 'done'}
+            >
+              {primaryButtonLabel}
+            </button>
+          </div>
+        ) : null}
 
       </div>
 
