@@ -3,6 +3,8 @@
  * Mirrors Bazar `TOKEN_REGISTRY` / `TokenSelector` so StreamVault can list against the same markets.
  * @see https://github.com/permaweb/bazar — helpers/config.ts TOKEN_REGISTRY
  */
+import { fetchHyperbeamAssetState } from './hbNode';
+import { resolveProfileMediaUrl } from './permaProfile';
 
 /** Mainnet wAR — common Bazar market token (StreamVault listing default). */
 export const DEFAULT_WAR_TOKEN_ID =
@@ -156,6 +158,49 @@ export function rememberPreferredUcmQuoteTokenId(tokenId: string): void {
 export function resolveInitialUcmQuoteToken(): UcmQuoteToken {
   const preferred = readPreferredUcmQuoteTokenId();
   return (preferred && getUcmQuoteToken(preferred)) || getDefaultUcmQuoteToken();
+}
+
+export function getUcmQuoteTokenLogoUrl(token: UcmQuoteToken, gateway = 'https://arweave.net'): string | null {
+  if (!token.logo) return null;
+  return `${gateway.replace(/\/$/, '')}/${token.logo}`;
+}
+
+function pick(obj: any, keys: string[]): any {
+  for (const key of keys) {
+    const value = obj?.[key];
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return null;
+}
+
+function extractTokenLogoUrl(info: any): string | null {
+  const metadata = pick(info, ['Metadata', 'metadata']) || {};
+  const logo =
+    pick(info, ['Logo', 'logo', 'Thumbnail', 'thumbnail', 'Image', 'image', 'Icon', 'icon']) ||
+    pick(metadata, ['Logo', 'logo', 'Thumbnail', 'thumbnail', 'Image', 'image', 'Icon', 'icon']);
+  return resolveProfileMediaUrl(logo);
+}
+
+export async function resolveUcmQuoteTokenLogoUrl(libs: any, token: UcmQuoteToken): Promise<string | null> {
+  if (libs?.readProcess) {
+    try {
+      const info = await libs.readProcess({ processId: token.id, action: 'Info' });
+      const url = extractTokenLogoUrl(info);
+      if (url) return url;
+    } catch {
+      // fall back below
+    }
+  }
+
+  try {
+    const hb = await fetchHyperbeamAssetState(token.id);
+    const url = extractTokenLogoUrl(hb?.json);
+    if (url) return url;
+  } catch {
+    // fall back below
+  }
+
+  return getUcmQuoteTokenLogoUrl(token);
 }
 
 /** Convert human amount (e.g. 0.1 wAR) to token base units for UCM unitPrice. */

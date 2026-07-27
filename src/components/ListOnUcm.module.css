@@ -63,6 +63,133 @@
   color: var(--text-primary);
 }
 
+.tokenSelect {
+  position: relative;
+}
+
+.tokenSelectButton,
+.tokenMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--bg-glass-border);
+  background: var(--bg-glass);
+  color: var(--text-secondary);
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.tokenSelectButton {
+  min-height: 46px;
+}
+
+.tokenSelectButton:hover:not(:disabled),
+.tokenMenuItem:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tokenSelectButton:disabled,
+.tokenMenuItem:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.tokenSelectButton[aria-expanded='true'],
+.tokenMenuItemActive {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--text-primary);
+}
+
+.tokenMenu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  padding: 6px;
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #121216;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+}
+
+.tokenMenuItem {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+}
+
+.tokenMenuItem + .tokenMenuItem {
+  margin-top: 2px;
+}
+
+.tokenLogo,
+.tokenFallback {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.tokenLogo {
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tokenFallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.65rem;
+  font-weight: var(--font-semibold);
+}
+
+.tokenText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.15;
+}
+
+.tokenText strong,
+.tokenText span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tokenText strong {
+  font-size: var(--text-xs);
+  color: inherit;
+}
+
+.tokenText span {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+}
+
+.tokenChevron {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  line-height: 1;
+}
+
 .listBtn {
   display: inline-flex;
   align-items: center;
