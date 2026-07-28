@@ -13,7 +13,7 @@ import { publishFullAsAtomicAsset, createFiatTopUpSession } from '../lib/publish
 import { fetchTurboBalance, formatTurboCredits, type TurboBalance } from '../lib/turboCredits';
 import { fetchL1CostForBytes, fetchTurboCostForBytes, formatArFromWinston } from '../lib/uploadCosts';
 import { appendUploadLedger } from '../lib/uploadLedger';
-import type { UdlConfig, RoyaltySplit, UdlAiUse } from '../lib/udl';
+import type { UdlConfig, RoyaltySplit, UdlAiUse, UdlCommercialUse, UdlDerivation, UdlPaymentMode } from '../lib/udl';
 import { UDL_LICENSE_TX_ID, UDL_LICENSE_URL } from '../lib/udl';
 import { udlToSummary } from '../lib/uploadedTracks';
 import { PublishPrimaryUpload } from './publish/PublishPrimaryUpload';
@@ -104,6 +104,11 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
   const [aiUse, setAiUse] = useState<UdlAiUse>('deny');
   const [licenseFee, setLicenseFee] = useState<string>('0');
   const [licenseCurrency, setLicenseCurrency] = useState<string>('MATIC');
+  const [commercialUse, setCommercialUse] = useState<'' | UdlCommercialUse>('');
+  const [derivation, setDerivation] = useState<'' | UdlDerivation>('');
+  const [excludeUnknownUsageRights, setExcludeUnknownUsageRights] = useState(false);
+  const [licenseExpiryYears, setLicenseExpiryYears] = useState('');
+  const [paymentMode, setPaymentMode] = useState<UdlPaymentMode>('Global-Distribution');
   const [splitDrafts, setSplitDrafts] = useState<SplitDraft[]>([
     { id: 'primary', address: '', percent: '100', chain: 'arweave', token: 'AR' },
   ]);
@@ -363,7 +368,12 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
       fee,
       currency: licenseCurrency || 'MATIC',
       paymentAddress,
+      paymentMode,
       interval: 'per-stream',
+      commercialUse: commercialUse || (usage.includes('commercial-sync') ? 'Allowed' : undefined),
+      derivation: derivation || undefined,
+      unknownUsageRights: excludeUnknownUsageRights ? 'Excluded' : undefined,
+      expiryYears: licenseExpiryYears.trim() || undefined,
       attribution: 'required',
     };
   };
@@ -1083,6 +1093,40 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
                 </label>
                 <div className={styles.licenseRow}>
                   <label className={styles.label} style={{ flex: 1 }}>
+                    Commercial use
+                    <select
+                      className={styles.select}
+                      value={commercialUse}
+                      onChange={(e) => setCommercialUse(e.target.value as '' | UdlCommercialUse)}
+                    >
+                      <option value="">Not allowed</option>
+                      <option value="Allowed">Allowed</option>
+                      <option value="Allowed-With-Credit">Allowed with credit</option>
+                      <option value="Allowed-With-Fee-One-Time">Allowed with one-time fee</option>
+                      <option value="Allowed-With-Fee-Monthly">Allowed with monthly fee</option>
+                      <option value="Allowed-With-RevenueShare">Allowed with revenue share</option>
+                    </select>
+                  </label>
+                  <label className={styles.label} style={{ flex: 1 }}>
+                    Derivations
+                    <select
+                      className={styles.select}
+                      value={derivation}
+                      onChange={(e) => setDerivation(e.target.value as '' | UdlDerivation)}
+                    >
+                      <option value="">Not allowed</option>
+                      <option value="Allowed">Allowed</option>
+                      <option value="Allowed-With-Credit">Allowed with credit</option>
+                      <option value="Allowed-With-Indication">Allowed with indication</option>
+                      <option value="Allowed-With-License-Passthrough">Allowed with license passthrough</option>
+                      <option value="Allowed-With-Fee-One-Time">Allowed with one-time fee</option>
+                      <option value="Allowed-With-Fee-Monthly">Allowed with monthly fee</option>
+                      <option value="Allowed-With-RevenueShare">Allowed with revenue share</option>
+                    </select>
+                  </label>
+                </div>
+                <div className={styles.licenseRow}>
+                  <label className={styles.label} style={{ flex: 1 }}>
                     License fee
                     <input
                       className={styles.input}
@@ -1105,6 +1149,28 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
                       <option value="USDC.base">USDC (Base)</option>
                       <option value="AR">AR (Arweave)</option>
                     </select>
+                  </label>
+                </div>
+                <div className={styles.licenseRow}>
+                  <label className={styles.label} style={{ flex: 1 }}>
+                    Expiry years
+                    <input
+                      className={styles.input}
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={licenseExpiryYears}
+                      onChange={(e) => setLicenseExpiryYears(e.target.value)}
+                      placeholder="Unlimited"
+                    />
+                  </label>
+                  <label className={styles.checkLabel} style={{ flex: 1, marginTop: 20 }}>
+                    <input
+                      type="checkbox"
+                      checked={excludeUnknownUsageRights}
+                      onChange={(e) => setExcludeUnknownUsageRights(e.target.checked)}
+                    />
+                    <span>Exclude unknown usage rights</span>
                   </label>
                 </div>
                 <p className={styles.hint}>
@@ -1264,6 +1330,17 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
                 {splitTotalBps !== 10_000 && normalizedSplits.length > 0 ? (
                   <p className={styles.fieldError}>Payout splits must total exactly 100% before publishing.</p>
                 ) : null}
+                <label className={styles.label}>
+                  UDL payment mode
+                  <select
+                    className={styles.select}
+                    value={paymentMode}
+                    onChange={(e) => setPaymentMode(e.target.value as UdlPaymentMode)}
+                  >
+                    <option value="Global-Distribution">Global distribution</option>
+                    <option value="Random-Distribution">Random distribution</option>
+                  </select>
+                </label>
                 <label className={styles.label}>
                   Secondary sale royalty (bps)
                   <input

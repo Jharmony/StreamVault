@@ -6,7 +6,21 @@ import { UDL_LICENSE_TX_ID, UDL_LICENSE_URL } from './udl';
 
 export type UploadedTrackUdlSummary = Pick<
   UdlConfig,
-  'licenseId' | 'usage' | 'aiUse' | 'fee' | 'currency' | 'interval' | 'attribution' | 'uri'
+  | 'licenseId'
+  | 'usage'
+  | 'aiUse'
+  | 'fee'
+  | 'currency'
+  | 'paymentAddress'
+  | 'paymentMode'
+  | 'interval'
+  | 'commercialUse'
+  | 'derivation'
+  | 'dataModelTraining'
+  | 'unknownUsageRights'
+  | 'expiryYears'
+  | 'attribution'
+  | 'uri'
 >;
 
 export type UploadedTrackRecord = {
@@ -127,11 +141,32 @@ export function normalizeUploadedTrackRecord(raw: unknown): UploadedTrackRecord 
             pickString(row.Currency) ||
             pickString(row['License-Currency']) ||
             'MATIC',
+          paymentAddress:
+            pickString((udlSource as any).paymentAddress) ||
+            pickString(row['Payment-Address']) ||
+            pickString(row['License-Fee-Recipient']),
+          paymentMode:
+            (pickString((udlSource as any).paymentMode) || pickString(row['Payment-Mode'])) as UploadedTrackUdlSummary['paymentMode'],
           interval:
             (pickString((udlSource as any).interval) ||
               standardFee?.interval ||
               pickString(row['License-Fee-Unit']) ||
               'per-stream') as UploadedTrackUdlSummary['interval'],
+          commercialUse:
+            (pickString((udlSource as any).commercialUse) || pickString(row['Commercial-Use'])) as UploadedTrackUdlSummary['commercialUse'],
+          derivation:
+            (pickString((udlSource as any).derivation) ||
+              pickString(row.Derivation) ||
+              pickString(row.Derivations)) as UploadedTrackUdlSummary['derivation'],
+          dataModelTraining:
+            (pickString((udlSource as any).dataModelTraining) ||
+              pickString(row['Data-Model-Training'])) as UploadedTrackUdlSummary['dataModelTraining'],
+          unknownUsageRights:
+            (pickString((udlSource as any).unknownUsageRights) ||
+              pickString(row['Unknown-Usage-Rights'])) as UploadedTrackUdlSummary['unknownUsageRights'],
+          expiryYears:
+            pickString((udlSource as any).expiryYears) ||
+            pickString(row.Expiry),
           attribution:
             (pickString((udlSource as any).attribution) ||
               pickString(row['License-Attribution'])) as UploadedTrackUdlSummary['attribution'],
@@ -147,7 +182,14 @@ export function normalizeUploadedTrackRecord(raw: unknown): UploadedTrackRecord 
             aiUse: (pickString(row['License-AI-Use']) || 'deny') as UploadedTrackUdlSummary['aiUse'],
             fee: standardFee?.fee || '0',
             currency: pickString(row.Currency) || pickString(row['License-Currency']) || 'MATIC',
+            paymentAddress: pickString(row['Payment-Address']) || pickString(row['License-Fee-Recipient']),
+            paymentMode: pickString(row['Payment-Mode']) as UploadedTrackUdlSummary['paymentMode'],
             interval: (standardFee?.interval || pickString(row['License-Fee-Unit']) || 'per-stream') as UploadedTrackUdlSummary['interval'],
+            commercialUse: pickString(row['Commercial-Use']) as UploadedTrackUdlSummary['commercialUse'],
+            derivation: (pickString(row.Derivation) || pickString(row.Derivations)) as UploadedTrackUdlSummary['derivation'],
+            dataModelTraining: pickString(row['Data-Model-Training']) as UploadedTrackUdlSummary['dataModelTraining'],
+            unknownUsageRights: pickString(row['Unknown-Usage-Rights']) as UploadedTrackUdlSummary['unknownUsageRights'],
+            expiryYears: pickString(row.Expiry),
             attribution: pickString(row['License-Attribution']) as UploadedTrackUdlSummary['attribution'],
             uri: pickString(row['License-URI']) || UDL_LICENSE_URL,
           }

@@ -69,8 +69,11 @@ const UDL_TAG_KEYS = new Set([
   'Payment-Address',
   'Payment-Mode',
   'Commercial-Use',
+  'Derivation',
   'Derivations',
   'Data-Model-Training',
+  'Unknown-Usage-Rights',
+  'Expiry',
 ]);
 const IDENTITY_KEYS = new Set([
   'Title',
