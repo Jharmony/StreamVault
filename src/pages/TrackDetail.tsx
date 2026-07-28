@@ -25,6 +25,8 @@ import { findAtomicAssetIdForAudioTx, fetchAtomicAssetMap, fetchAtomicAssetDispl
 import { uploadedTrackToPlayerTrack } from '../lib/uploadedTracks';
 import { useArweaveMediaSources } from '../hooks/useArweaveMediaSources';
 import { ListOnUcm } from '../components/ListOnUcm';
+import { Ans114Comments } from '../components/Ans114Comments';
+import { currentStreamVaultUrl, xIntentUrl } from '../lib/socialShare';
 import styles from './TrackDetail.module.css';
 
 function FieldRow({ row }: { row: TxFieldRow }) {
@@ -294,6 +296,20 @@ export function TrackDetail() {
     return creator.trim().toLowerCase() === address.toLowerCase();
   }, [ucmAssetId, creator, address, walletType]);
 
+  const shareUrl = useMemo(() => {
+    const id = data?.txId || rawTxId || '';
+    const url = currentStreamVaultUrl(`/track/${id}`);
+    const text =
+      resolvedAssetId || ucmAssetId
+        ? `Music atomic asset: "${title}" by ${artist} on StreamVault.`
+        : `Listening to "${title}" by ${artist} on StreamVault.`;
+    return xIntentUrl({
+      text,
+      url,
+      hashtags: ['StreamVault', 'Arweave', 'MusicNFTs'],
+    });
+  }, [artist, data?.txId, rawTxId, resolvedAssetId, title, ucmAssetId]);
+
   const handlePlay = () => {
     if (!playerTrack) return;
     if (isCurrent && isPlaying) pause();
@@ -390,6 +406,9 @@ export function TrackDetail() {
                 Open data
               </a>
             )}
+            <a className={styles.actionLinkX} href={shareUrl} target="_blank" rel="noopener noreferrer">
+              Share on X
+            </a>
           </div>
           {description && <p className={styles.subtext}>{description}</p>}
         </div>
@@ -400,6 +419,8 @@ export function TrackDetail() {
           <ListOnUcm assetId={ucmAssetId} title={title} assetCreatorHint={creator} compact />
         </section>
       ) : null}
+
+      <Ans114Comments rootSource={ucmAssetId || data.audioTxId || data.txId} title={title} />
 
       <section className={styles.section + ' glass'}>
         <h2 className={styles.sectionTitle}>Transaction</h2>
