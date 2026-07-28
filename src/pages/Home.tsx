@@ -379,12 +379,18 @@ export function Home() {
     (async () => {
       setPermanentLoading(true);
       try {
-        const assetMap = await fetchAtomicAssetMap({ limit: 100 });
-        if (cancelled) return;
-        setAtomicAssetByAudioTx(Object.fromEntries(assetMap));
         const rows = await fetchTrendingTracks(24);
-        const enriched = await enrichTracksWithAtomicAssetIds(rows, assetMap);
-        if (!cancelled) setArweaveDiscoverTracks(enriched);
+        if (cancelled) return;
+        setArweaveDiscoverTracks(rows);
+        try {
+          const assetMap = await fetchAtomicAssetMap({ limit: 100 });
+          if (cancelled) return;
+          setAtomicAssetByAudioTx(Object.fromEntries(assetMap));
+          const enriched = await enrichTracksWithAtomicAssetIds(rows, assetMap);
+          if (!cancelled) setArweaveDiscoverTracks(enriched);
+        } catch {
+          if (!cancelled) setAtomicAssetByAudioTx({});
+        }
       } catch {
         if (!cancelled) setArweaveDiscoverTracks([]);
       } finally {
@@ -393,12 +399,18 @@ export function Home() {
     })();
     const onUploads = () => {
       void (async () => {
-        const assetMap = await fetchAtomicAssetMap({ limit: 100 });
-        setAtomicAssetByAudioTx(Object.fromEntries(assetMap));
-        setArweaveDiscoverTracks((prev) => {
-          void enrichTracksWithAtomicAssetIds(prev, assetMap).then(setArweaveDiscoverTracks);
-          return prev;
-        });
+        try {
+          const rows = await fetchTrendingTracks(24);
+          setArweaveDiscoverTracks(rows);
+          const assetMap = await fetchAtomicAssetMap({ limit: 100 });
+          setAtomicAssetByAudioTx(Object.fromEntries(assetMap));
+          setArweaveDiscoverTracks((prev) => {
+            void enrichTracksWithAtomicAssetIds(prev, assetMap).then(setArweaveDiscoverTracks);
+            return prev;
+          });
+        } catch {
+          // Keep existing discovery rows if the index refresh path is temporarily unavailable.
+        }
       })();
     };
     window.addEventListener('streamvault:uploads-updated', onUploads);

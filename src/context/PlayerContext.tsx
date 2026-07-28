@@ -67,7 +67,6 @@ const PlayerContext = createContext<PlayerContextValue | null>(null);
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [audioSrc, setAudioSrc] = useState('');
   const [progress, setProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -79,11 +78,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const pendingResumeTimeRef = useRef(0);
 
   const startStreamAt = useCallback((index: number, resumeAtSeconds = 0) => {
+    const el = audioRef.current;
     const url = streamCandidatesRef.current[index];
-    if (!url) return;
+    if (!el || !url) return;
     streamIndexRef.current = index;
     pendingResumeTimeRef.current = resumeAtSeconds;
-    setAudioSrc(url);
+    el.crossOrigin = 'anonymous';
+    if (el.src !== url) {
+      el.src = url;
+      el.load();
+    }
+    void el.play().catch(console.error);
   }, []);
 
   const play = useCallback(
@@ -147,7 +152,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setCurrentTime(nextTime);
     setProgress(mediaDuration ? (nextTime / mediaDuration) * 100 : 0);
     if (el && mediaDuration) {
-      el.currentTime = nextTime;
+      try {
+        if ('fastSeek' in el && typeof el.fastSeek === 'function') {
+          el.fastSeek(nextTime);
+        } else {
+          el.currentTime = nextTime;
+        }
+      } catch {
+        el.currentTime = nextTime;
+      }
     }
   }, [duration]);
 
@@ -204,20 +217,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setIsPlaying(false);
   }, [currentTime, startStreamAt]);
 
-  React.useEffect(() => {
-    const el = audioRef.current;
-    if (!el || !audioSrc) return;
-    if (isPlaying) void el.play().catch(console.error);
-    else el.pause();
-  }, [audioSrc, isPlaying]);
-
   return (
     <PlayerContext.Provider
       value={{ currentTrack, isPlaying, progress, currentTime, duration, canSeek, play, pause, toggle, seek, seekTo }}
     >
       <audio
         ref={audioRef}
-        src={audioSrc || undefined}
         preload="metadata"
         onLoadedMetadata={handleLoadedMetadata}
         onDurationChange={handleDurationChange}

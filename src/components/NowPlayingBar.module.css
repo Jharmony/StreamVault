@@ -177,9 +177,8 @@
 
 @media (max-width: 720px) {
   .bar {
-    height: auto;
-    min-height: var(--player-height);
-    padding: 10px 14px;
+    height: var(--player-height);
+    padding: 8px 12px;
     gap: 12px;
   }
 
@@ -197,6 +196,7 @@
   .controls {
     flex: 1.4;
     max-width: none;
+    min-width: 110px;
   }
 
   .badges {

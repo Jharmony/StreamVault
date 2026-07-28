@@ -670,10 +670,19 @@ export async function fetchTrendingTracks(limit = 24): Promise<Track[]> {
     if (aTime !== bTime) return bTime - aTime;
     return 0;
   });
-  const withAssetIds = await enrichTracksWithAtomicAssetIds(
-    merged.slice(0, limit),
-    await fetchAtomicAssetMap({ limit: 100 })
-  );
-  const enriched = await enrichTrackArtworkFromAtomicAssets(withAssetIds);
-  return enriched;
+  const baseTracks = merged.slice(0, limit);
+  let withAssetIds = baseTracks;
+  try {
+    withAssetIds = await enrichTracksWithAtomicAssetIds(
+      baseTracks,
+      await fetchAtomicAssetMap({ limit: 100 })
+    );
+  } catch {
+    withAssetIds = baseTracks;
+  }
+  try {
+    return await enrichTrackArtworkFromAtomicAssets(withAssetIds);
+  } catch {
+    return withAssetIds;
+  }
 }
