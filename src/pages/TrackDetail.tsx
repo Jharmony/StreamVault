@@ -4,7 +4,7 @@ import { LogoSpinner } from '../components/LogoSpinner';
 import type { Track } from '../context/PlayerContext';
 import { usePlayer } from '../context/PlayerContext';
 import { useWallet } from '../context/WalletContext';
-import { arweaveTxDataUrl, arweaveTxMetaUrl } from '../lib/arweaveDataGateway';
+import { arweaveExplorerUrl, arweaveTxDataUrl } from '../lib/arweaveDataGateway';
 import {
   artworkUrlFromTags,
   explorerTransactionRows,
@@ -379,7 +379,7 @@ export function TrackDetail() {
             )}
             <a
               className={styles.actionLinkAccent}
-              href={arweaveTxMetaUrl(data.txId)}
+              href={arweaveExplorerUrl(data.txId)}
               target="_blank"
               rel="noopener noreferrer"
             >

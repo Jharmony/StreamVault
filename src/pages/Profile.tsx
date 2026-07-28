@@ -79,6 +79,7 @@ import {
 } from '../lib/ucmMarketplace';
 import { bazarAssetUrl } from '../lib/ucm';
 import { ATOMIC_ASSET_BADGE } from '../lib/trackBadges';
+import { UDL_LICENSE_TX_ID } from '../lib/udl';
 import { useApi } from '@arweave-wallet-kit/react';
 import styles from './Profile.module.css';
 
@@ -2511,7 +2512,7 @@ export function Profile() {
                   </div>
                   <div className={styles.sampleLinks}>
                     <span className={styles.subtext}>
-                      License: <strong>{track.udl?.licenseId || 'udl://music/1.0'}</strong>{' '}
+                      License: <strong>{track.udl?.licenseId || UDL_LICENSE_TX_ID}</strong>{' '}
                       · AI: <strong>{track.udl?.aiUse || 'n/a'}</strong>
                     </span>
                     {track.audioTxId && (

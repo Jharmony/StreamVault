@@ -14,6 +14,7 @@ import { fetchTurboBalance, formatTurboCredits, type TurboBalance } from '../lib
 import { fetchL1CostForBytes, fetchTurboCostForBytes, formatArFromWinston } from '../lib/uploadCosts';
 import { appendUploadLedger } from '../lib/uploadLedger';
 import type { UdlConfig, RoyaltySplit, UdlAiUse } from '../lib/udl';
+import { UDL_LICENSE_TX_ID, UDL_LICENSE_URL } from '../lib/udl';
 import { udlToSummary } from '../lib/uploadedTracks';
 import { PublishPrimaryUpload } from './publish/PublishPrimaryUpload';
 import { ListOnUcm } from './ListOnUcm';
@@ -355,8 +356,8 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
     const fee = licenseFee.trim() || '0';
 
     return {
-      licenseId: 'udl://music/1.0',
-      uri: (import.meta as any).env?.VITE_UDL_LICENSE_URI || undefined,
+      licenseId: UDL_LICENSE_TX_ID,
+      uri: (import.meta as any).env?.VITE_UDL_LICENSE_URI || UDL_LICENSE_URL,
       usage,
       aiUse,
       fee,
@@ -1107,7 +1108,11 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
                   </label>
                 </div>
                 <p className={styles.hint}>
-                  Applied as Arweave tags (and atomic asset metadata when minting).
+                  Applied as Arweave tags using the Bazar-compatible UDL license id{' '}
+                  <a className={styles.link} href={UDL_LICENSE_URL} target="_blank" rel="noopener noreferrer">
+                    {UDL_LICENSE_TX_ID.slice(0, 8)}...{UDL_LICENSE_TX_ID.slice(-6)}
+                  </a>
+                  .
                 </p>
               </div>
 
