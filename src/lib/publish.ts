@@ -810,6 +810,10 @@ export async function publishFullAsAtomicAsset(
     splits?: RoyaltySplit[];
     useTurbo?: boolean;
     turboPaymentToken?: TurboPaymentToken;
+    /** Atomic asset edition supply. 1 = one-of-one, >1 = multiple tradable copies. */
+    atomicSupply?: number;
+    /** Atomic asset denomination. Keep 1 for whole-copy music editions. */
+    atomicDenomination?: number;
     /** If true (default), only upload the signed data tx with tags (no permaweb-libs atomic asset). Pass false to mint. */
     skipAtomicAsset?: boolean;
     audiusTrackId?: string;
@@ -851,6 +855,8 @@ export async function publishFullAsAtomicAsset(
     opts?.onStage?.('preparing');
     const title = ans110Title(args.title);
     const artist = nfc(args.artist);
+    const atomicSupply = Math.max(1, Math.floor(args.atomicSupply || 1));
+    const atomicDenomination = Math.max(1, Math.floor(args.atomicDenomination || 1));
     console.info('[publish] Full asset publish started', { title, artist });
     const udl = args.udl;
     const splits = args.splits;
@@ -928,6 +934,10 @@ export async function publishFullAsAtomicAsset(
 
     if (splits && splits.length > 0) {
       baseTags.push({ name: 'Royalties-Splits', value: JSON.stringify(splits) });
+    }
+    if (!skipAtomicAsset) {
+      baseTags.push({ name: 'StreamVault-Edition-Supply', value: String(atomicSupply) });
+      baseTags.push({ name: 'StreamVault-Atomic-Denomination', value: String(atomicDenomination) });
     }
 
     const confirmTimeoutMs = Math.min(
@@ -1068,6 +1078,8 @@ export async function publishFullAsAtomicAsset(
         : {}),
       ...(udl ? { udl } : {}),
       ...(splits && splits.length > 0 ? { splits } : {}),
+      editionSupply: atomicSupply,
+      atomicDenomination,
     });
 
     opts?.onStage?.('creating-atomic-asset');
@@ -1090,6 +1102,8 @@ export async function publishFullAsAtomicAsset(
     if (splits && splits.length > 0) {
       assetTags.push({ name: 'Royalties-Splits', value: JSON.stringify(splits) });
     }
+    assetTags.push({ name: 'StreamVault-Edition-Supply', value: String(atomicSupply) });
+    assetTags.push({ name: 'StreamVault-Atomic-Denomination', value: String(atomicDenomination) });
 
     if (!title || !creatorAddress) {
       return {
@@ -1112,8 +1126,8 @@ export async function publishFullAsAtomicAsset(
             data: permawebUrl,
             contentType: 'text/plain',
             assetType: 'audio',
-            supply: 1,
-            denomination: 1,
+            supply: atomicSupply,
+            denomination: atomicDenomination,
             transferable: true,
             metadata,
             tags: dedupeArweaveTags(assetTags),

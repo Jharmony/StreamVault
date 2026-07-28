@@ -27,6 +27,7 @@ interface PublishModalProps {
 
 export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
   type PublishMode = 'regular' | 'atomic';
+  type AtomicEditionMode = 'one-of-one' | 'multi-edition';
   type SplitDraft = {
     id: string;
     address: string;
@@ -93,6 +94,8 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
   /** When publishing full tier from an Audius-backed track, download bytes from streamUrl (CORS permitting). */
   const [useAudiusStreamForFull, setUseAudiusStreamForFull] = useState(isAudiusBackedTrack);
   const [publishMode, setPublishMode] = useState<PublishMode | null>(null);
+  const [atomicEditionMode, setAtomicEditionMode] = useState<AtomicEditionMode>('one-of-one');
+  const [atomicEditionSupply, setAtomicEditionSupply] = useState<string>('1');
   const createAtomicAssetExperimental = publishMode === 'atomic';
 
   // Simple UDL controls
@@ -383,6 +386,12 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
     [normalizedSplits]
   );
 
+  const normalizedAtomicSupply = useMemo(() => {
+    if (!createAtomicAssetExperimental || atomicEditionMode === 'one-of-one') return 1;
+    const parsed = Number(atomicEditionSupply);
+    return Number.isFinite(parsed) ? Math.floor(parsed) : 0;
+  }, [atomicEditionMode, atomicEditionSupply, createAtomicAssetExperimental]);
+
   const buildRoyaltySplits = (): RoyaltySplit[] => {
     if (normalizedSplits.length === 0) {
       if (!address) return [];
@@ -487,6 +496,17 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
         isSubmittingRef.current = false;
         return;
       }
+      if (
+        createAtomicAssetExperimental &&
+        atomicEditionMode === 'multi-edition' &&
+        normalizedAtomicSupply < 2
+      ) {
+        setStatus('error');
+        setPublishStage('error');
+        setErrorMessage('Multiple-edition atomic assets must have at least 2 editions.');
+        isSubmittingRef.current = false;
+        return;
+      }
       const splits = buildRoyaltySplits();
       const udlConfig = buildUdlConfig(splits[0]?.address);
       const skipAtomicAsset = !createAtomicAssetExperimental;
@@ -516,6 +536,8 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
           splits,
           useTurbo,
           turboPaymentToken: turboToken,
+          atomicSupply: normalizedAtomicSupply,
+          atomicDenomination: 1,
           skipAtomicAsset,
           audiusTrackId: isAudiusBackedTrack ? track?.id : undefined,
           fromAudiusStream: Boolean(useAudiusStreamForFull && track?.streamUrl),
@@ -1110,6 +1132,56 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
                 <p className={styles.hint}>
                   Publishing mode: experimental atomic asset mint after the audio upload.
                 </p>
+              )}
+              {createAtomicAssetExperimental && (
+                <div className={styles.editionBlock}>
+                  <div>
+                    <p className={styles.licenseTitle}>Edition supply</p>
+                    <p className={styles.hint}>
+                      Choose a single 1/1 release or multiple tradable copies of the same music atomic asset.
+                    </p>
+                  </div>
+                  <div className={styles.editionModeRow} role="group" aria-label="Atomic asset edition supply">
+                    <button
+                      type="button"
+                      className={`${styles.editionModeBtn} ${atomicEditionMode === 'one-of-one' ? styles.editionModeBtnActive : ''}`}
+                      onClick={() => {
+                        setAtomicEditionMode('one-of-one');
+                        setAtomicEditionSupply('1');
+                      }}
+                    >
+                      1 of 1
+                    </button>
+                    <button
+                      type="button"
+                      className={`${styles.editionModeBtn} ${atomicEditionMode === 'multi-edition' ? styles.editionModeBtnActive : ''}`}
+                      onClick={() => {
+                        setAtomicEditionMode('multi-edition');
+                        setAtomicEditionSupply((current) => (Number(current) > 1 ? current : '25'));
+                      }}
+                    >
+                      Fractional / editions
+                    </button>
+                  </div>
+                  {atomicEditionMode === 'multi-edition' && (
+                    <label className={styles.label}>
+                      Total editions
+                      <input
+                        className={styles.input}
+                        type="number"
+                        min={2}
+                        step={1}
+                        value={atomicEditionSupply}
+                        onChange={(e) => setAtomicEditionSupply(e.target.value)}
+                        placeholder="25"
+                      />
+                    </label>
+                  )}
+                  <p className={styles.hint}>
+                    Minting supply: <strong>{Math.max(1, normalizedAtomicSupply || 1)}</strong>{' '}
+                    {Math.max(1, normalizedAtomicSupply || 1) === 1 ? 'copy' : 'copies'}.
+                  </p>
+                </div>
               )}
               <div className={styles.splitBlock}>
                 <div className={styles.splitHeader}>
