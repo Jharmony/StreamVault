@@ -1,5 +1,7 @@
 import {
+  arweaveExplorerUrl,
   arweaveL1GraphqlEndpoint,
+  resilientArweaveDataUrl,
   arweaveTxDataUrl,
   arweaveTxMetaUrl,
   arweaveTxStatusUrls,
@@ -11,6 +13,7 @@ import { arweaveArtistPath, looksLikeWalletAddress } from './arweaveArtist';
 import { findAudioTxIdForAtomicAsset } from './arweaveDiscovery';
 import type { UploadedTrackRecord } from './uploadedTracks';
 import { udlConfigToTags } from './udl';
+import { UDL_LICENSE_TX_ID, UDL_LICENSE_URL } from './udl';
 
 export type ArweaveTag = { name: string; value: string };
 
@@ -59,6 +62,19 @@ export type ArweaveTxExplorerData = {
 };
 
 const LICENSE_PREFIX = 'License';
+const UDL_TAG_KEYS = new Set([
+  'Access',
+  'Access-Fee',
+  'Currency',
+  'Payment-Address',
+  'Payment-Mode',
+  'Commercial-Use',
+  'Derivation',
+  'Derivations',
+  'Data-Model-Training',
+  'Unknown-Usage-Rights',
+  'Expiry',
+]);
 const IDENTITY_KEYS = new Set([
   'Title',
   'Artist',
@@ -176,7 +192,7 @@ export function isAudioContentType(contentType?: string): boolean {
 export function trackStreamUrl(txId: string, _tags?: ArweaveTag[], preferTurbo = true): string {
   const id = normalizeArweaveTxId(txId);
   if (preferTurbo) {
-    return preferredArweaveStreamUrl(id);
+    return resilientArweaveDataUrl(id);
   }
   return arweaveTxDataUrl(id);
 }
@@ -269,8 +285,14 @@ export function parseTrackTagSections(tags: ArweaveTag[]): ParsedTrackTags {
   }
 
   for (const t of tags) {
-    if (!t.name.startsWith(LICENSE_PREFIX)) continue;
-    push(license, t.name, t.value, t.name === 'License-URI' ? { href: t.value } : undefined);
+    if (!t.name.startsWith(LICENSE_PREFIX) && !UDL_TAG_KEYS.has(t.name)) continue;
+    const href =
+      t.name === 'License-URI'
+        ? t.value
+        : t.name === 'License' && (t.value === UDL_LICENSE_TX_ID || t.value === 'udl://music/1.0')
+          ? UDL_LICENSE_URL
+          : undefined;
+    push(license, t.name, t.value, href ? { href } : undefined);
     consumed.add(t.name);
   }
 
@@ -320,8 +342,6 @@ export function parseTrackTagSections(tags: ArweaveTag[]): ParsedTrackTags {
     push(atomic, 'Variant', variant);
     consumed.add('Variant');
   }
-
-  if (getTag(tags, 'License-Currency')) consumed.add('Currency');
 
   for (const t of tags) {
     if (
@@ -674,13 +694,13 @@ export function explorerTransactionRows(
 
   rows.push({
     label: 'Explorer',
-    value: 'View on arweave.net',
-    href: data.metaUrl,
+    value: 'View transaction',
+    href: arweaveExplorerUrl(displayTxId),
   });
   rows.push({
     label: 'Data URL',
     value: 'Open raw data',
-    href: arweaveTxDataUrl(displayTxId),
+    href: resilientArweaveDataUrl(displayTxId),
   });
 
   return rows;

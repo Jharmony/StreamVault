@@ -91,6 +91,17 @@ export function turboTxDataUrl(txId: string): string {
   return `${TURBO_PUBLIC_DATA_GATEWAY_BASE}/${id}`;
 }
 
+/** User-facing raw data URL: prefer Turbo because arweave.net redirects can fail without VPN. */
+export function resilientArweaveDataUrl(txId: string): string {
+  return turboTxDataUrl(txId);
+}
+
+/** User-facing explorer URL that avoids arweave.net/tx redirects. */
+export function arweaveExplorerUrl(txId: string): string {
+  const id = normalizeArweaveTxId(txId);
+  return `https://viewblock.io/arweave/tx/${encodeURIComponent(id)}`;
+}
+
 /** Ordered public data URLs for a tx (stream / artwork) — first is preferred. */
 export function arweavePublicDataUrls(txId: string): string[] {
   const id = normalizeArweaveTxId(txId);

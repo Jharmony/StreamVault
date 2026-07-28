@@ -1,11 +1,26 @@
 import type { Track } from '../context/PlayerContext';
-import { preferredArweaveStreamUrl, arweaveTxDataUrl } from './arweaveDataGateway';
+import { preferredArweaveStreamUrl, resilientArweaveDataUrl } from './arweaveDataGateway';
 import { trackSourceBadges } from './trackBadges';
-import type { RoyaltySplit, UdlConfig } from './udl';
+import type { RoyaltySplit, UdlConfig, UdlInterval } from './udl';
+import { UDL_LICENSE_TX_ID, UDL_LICENSE_URL } from './udl';
 
 export type UploadedTrackUdlSummary = Pick<
   UdlConfig,
-  'licenseId' | 'usage' | 'aiUse' | 'fee' | 'currency' | 'interval' | 'attribution' | 'uri'
+  | 'licenseId'
+  | 'usage'
+  | 'aiUse'
+  | 'fee'
+  | 'currency'
+  | 'paymentAddress'
+  | 'paymentMode'
+  | 'interval'
+  | 'commercialUse'
+  | 'derivation'
+  | 'dataModelTraining'
+  | 'unknownUsageRights'
+  | 'expiryYears'
+  | 'attribution'
+  | 'uri'
 >;
 
 export type UploadedTrackRecord = {
@@ -50,6 +65,17 @@ function parseUsage(value: unknown): string[] | undefined {
   return undefined;
 }
 
+function parseStandardFee(value: unknown): { fee: string; interval: UdlInterval } | null {
+  const raw = pickString(value);
+  if (!raw) return null;
+  const match = raw.match(/^(One-Time|Monthly)-(.+)$/i);
+  if (!match) return { fee: raw, interval: 'per-stream' };
+  return {
+    fee: match[2] || '0',
+    interval: match[1].toLowerCase() === 'monthly' ? 'per-month' : 'one-time',
+  };
+}
+
 function parseSplits(value: unknown): RoyaltySplit[] | undefined {
   if (Array.isArray(value)) return value as RoyaltySplit[];
   if (typeof value === 'string') {
@@ -92,6 +118,7 @@ export function normalizeUploadedTrackRecord(raw: unknown): UploadedTrackRecord 
     new Date(0).toISOString();
   const udlSource = (row.udl || row.UDL) as UdlConfig | UploadedTrackUdlSummary | undefined;
   const usage = parseUsage((udlSource as any)?.usage ?? row['License-Use'] ?? row.licenseUse);
+  const standardFee = parseStandardFee(row['Access-Fee'] ?? row['License-Fee']);
   const normalizedUdl =
     udlSource && typeof udlSource === 'object'
       ? {
@@ -99,7 +126,7 @@ export function normalizeUploadedTrackRecord(raw: unknown): UploadedTrackRecord 
             pickString((udlSource as any).licenseId) ||
             pickString((udlSource as any).License) ||
             pickString(row.License) ||
-            'udl://music/1.0',
+            UDL_LICENSE_TX_ID,
           usage: usage || [],
           aiUse:
             (pickString((udlSource as any).aiUse) ||
@@ -107,33 +134,64 @@ export function normalizeUploadedTrackRecord(raw: unknown): UploadedTrackRecord 
               'deny') as UploadedTrackUdlSummary['aiUse'],
           fee:
             pickString((udlSource as any).fee) ||
-            pickString(row['License-Fee']) ||
+            standardFee?.fee ||
             '0',
           currency:
             pickString((udlSource as any).currency) ||
+            pickString(row.Currency) ||
             pickString(row['License-Currency']) ||
             'MATIC',
+          paymentAddress:
+            pickString((udlSource as any).paymentAddress) ||
+            pickString(row['Payment-Address']) ||
+            pickString(row['License-Fee-Recipient']),
+          paymentMode:
+            (pickString((udlSource as any).paymentMode) || pickString(row['Payment-Mode'])) as UploadedTrackUdlSummary['paymentMode'],
           interval:
             (pickString((udlSource as any).interval) ||
+              standardFee?.interval ||
               pickString(row['License-Fee-Unit']) ||
               'per-stream') as UploadedTrackUdlSummary['interval'],
+          commercialUse:
+            (pickString((udlSource as any).commercialUse) || pickString(row['Commercial-Use'])) as UploadedTrackUdlSummary['commercialUse'],
+          derivation:
+            (pickString((udlSource as any).derivation) ||
+              pickString(row.Derivation) ||
+              pickString(row.Derivations)) as UploadedTrackUdlSummary['derivation'],
+          dataModelTraining:
+            (pickString((udlSource as any).dataModelTraining) ||
+              pickString(row['Data-Model-Training'])) as UploadedTrackUdlSummary['dataModelTraining'],
+          unknownUsageRights:
+            (pickString((udlSource as any).unknownUsageRights) ||
+              pickString(row['Unknown-Usage-Rights'])) as UploadedTrackUdlSummary['unknownUsageRights'],
+          expiryYears:
+            pickString((udlSource as any).expiryYears) ||
+            pickString(row.Expiry),
           attribution:
             (pickString((udlSource as any).attribution) ||
               pickString(row['License-Attribution'])) as UploadedTrackUdlSummary['attribution'],
           uri:
             pickString((udlSource as any).uri) ||
-            pickString(row['License-URI']),
+            pickString(row['License-URI']) ||
+            UDL_LICENSE_URL,
         }
       : pickString(row.License) || pickString(row['License-Use']) || pickString(row['License-AI-Use'])
         ? {
-            licenseId: pickString(row.License) || 'udl://music/1.0',
+            licenseId: pickString(row.License) || UDL_LICENSE_TX_ID,
             usage: usage || [],
             aiUse: (pickString(row['License-AI-Use']) || 'deny') as UploadedTrackUdlSummary['aiUse'],
-            fee: pickString(row['License-Fee']) || '0',
-            currency: pickString(row['License-Currency']) || 'MATIC',
-            interval: (pickString(row['License-Fee-Unit']) || 'per-stream') as UploadedTrackUdlSummary['interval'],
+            fee: standardFee?.fee || '0',
+            currency: pickString(row.Currency) || pickString(row['License-Currency']) || 'MATIC',
+            paymentAddress: pickString(row['Payment-Address']) || pickString(row['License-Fee-Recipient']),
+            paymentMode: pickString(row['Payment-Mode']) as UploadedTrackUdlSummary['paymentMode'],
+            interval: (standardFee?.interval || pickString(row['License-Fee-Unit']) || 'per-stream') as UploadedTrackUdlSummary['interval'],
+            commercialUse: pickString(row['Commercial-Use']) as UploadedTrackUdlSummary['commercialUse'],
+            derivation: (pickString(row.Derivation) || pickString(row.Derivations)) as UploadedTrackUdlSummary['derivation'],
+            dataModelTraining: pickString(row['Data-Model-Training']) as UploadedTrackUdlSummary['dataModelTraining'],
+            unknownUsageRights: pickString(row['Unknown-Usage-Rights']) as UploadedTrackUdlSummary['unknownUsageRights'],
+            expiryYears: pickString(row.Expiry),
             attribution: pickString(row['License-Attribution']) as UploadedTrackUdlSummary['attribution'],
-            uri: pickString(row['License-URI']),
+            uri: pickString(row['License-URI']) || UDL_LICENSE_URL,
           }
         : undefined;
 
@@ -170,7 +228,9 @@ export function normalizeUploadedTrackRecord(raw: unknown): UploadedTrackRecord 
  * fresh Turbo data items play before `arweave.net/{id}` finishes propagating.
  */
 export function uploadedTrackShareUrl(track: Pick<UploadedTrackRecord, 'txId' | 'permawebUrl' | 'arioUrl'>): string {
-  return track.arioUrl || preferredArweaveStreamUrl(track.txId) || track.permawebUrl || arweaveTxDataUrl(track.txId);
+  const arioUrl = String(track.arioUrl || '').trim();
+  if (arioUrl && !/^https:\/\/(?:www\.)?arweave\.net\//i.test(arioUrl)) return arioUrl;
+  return resilientArweaveDataUrl(track.txId) || track.permawebUrl || arioUrl;
 }
 
 function normalizeText(value: string | undefined): string {

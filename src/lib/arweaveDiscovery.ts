@@ -26,6 +26,8 @@ import { fetchHyperbeamAssetState } from './hbNode';
 import { findUploadLedgerByTxId } from './uploadLedger';
 import { resolveProfileMediaUrl } from './permaProfile';
 import type { UploadedTrackRecord } from './uploadedTracks';
+import type { UdlInterval } from './udl';
+import { UDL_LICENSE_TX_ID, UDL_LICENSE_URL } from './udl';
 const ASSET_BY_AUDIO_QUERY = `
   query StreamVaultAssetByAudio($tags: [TagFilter!]!, $first: Int!) {
     transactions(tags: $tags, first: $first, sort: HEIGHT_DESC) {
@@ -73,10 +75,22 @@ function getTag(node: AudioTxNode, name: string): string | undefined {
   return t?.value;
 }
 
+function parseStandardFee(value?: string): { fee: string; interval: UdlInterval } | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const match = raw.match(/^(One-Time|Monthly)-(.+)$/i);
+  if (!match) return { fee: raw, interval: 'per-stream' };
+  return {
+    fee: match[2] || '0',
+    interval: match[1].toLowerCase() === 'monthly' ? 'per-month' : 'one-time',
+  };
+}
+
 function nodeToUploadedTrack(node: AudioTxNode): UploadedTrackRecord {
   const txId = node.id;
   const title = getTag(node, 'Title') || 'Untitled';
   const artist = getTag(node, 'Artist') || getTag(node, 'Artist-Address') || 'Unknown';
+  const standardFee = parseStandardFee(getTag(node, 'Access-Fee') || getTag(node, 'License-Fee'));
   return {
     txId,
     title,
@@ -98,17 +112,24 @@ function nodeToUploadedTrack(node: AudioTxNode): UploadedTrackRecord {
     udl:
       getTag(node, 'License') || getTag(node, 'License-Use') || getTag(node, 'License-AI-Use')
         ? {
-            licenseId: getTag(node, 'License') || 'udl://music/1.0',
+            licenseId: getTag(node, 'License') || UDL_LICENSE_TX_ID,
             usage: (getTag(node, 'License-Use') || '')
               .split(',')
               .map((value) => value.trim())
               .filter(Boolean),
             aiUse: (getTag(node, 'License-AI-Use') || 'deny') as any,
-            fee: getTag(node, 'License-Fee') || '0',
-            currency: getTag(node, 'License-Currency') || 'MATIC',
-            interval: (getTag(node, 'License-Fee-Unit') || 'per-stream') as any,
+            fee: standardFee?.fee || '0',
+            currency: getTag(node, 'Currency') || getTag(node, 'License-Currency') || 'MATIC',
+            paymentAddress: getTag(node, 'Payment-Address') || getTag(node, 'License-Fee-Recipient'),
+            paymentMode: getTag(node, 'Payment-Mode') as any,
+            interval: (standardFee?.interval || getTag(node, 'License-Fee-Unit') || 'per-stream') as any,
+            commercialUse: getTag(node, 'Commercial-Use') as any,
+            derivation: (getTag(node, 'Derivation') || getTag(node, 'Derivations')) as any,
+            dataModelTraining: getTag(node, 'Data-Model-Training') as any,
+            unknownUsageRights: getTag(node, 'Unknown-Usage-Rights') as any,
+            expiryYears: getTag(node, 'Expiry'),
             attribution: getTag(node, 'License-Attribution') as any,
-            uri: getTag(node, 'License-URI'),
+            uri: getTag(node, 'License-URI') || UDL_LICENSE_URL,
           }
         : undefined,
   };
