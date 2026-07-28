@@ -291,6 +291,15 @@ function getBrowserSolanaWalletAdapter(win: Window | null): any {
   return w.solana ?? w.phantom?.solana ?? null;
 }
 
+function normalizeSignedDataItemBytes(signedDataItem: unknown): Uint8Array {
+  const raw = (signedDataItem as { raw?: unknown; data?: unknown })?.raw ?? (signedDataItem as { data?: unknown })?.data ?? signedDataItem;
+  if (raw instanceof Uint8Array) return raw;
+  if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
+  if (ArrayBuffer.isView(raw)) return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+  if (Array.isArray(raw)) return new Uint8Array(raw);
+  throw new Error('Wander returned an unsupported signed data item format.');
+}
+
 async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
   const win = typeof window !== 'undefined' ? window : null;
   const { TurboFactory, ArconnectSigner } = await import('@ardrive/turbo-sdk/web');
@@ -299,6 +308,43 @@ async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
   if (args.paymentToken === 'arweave') {
     const wallet = (win as any)?.arweaveWallet;
     if (!wallet) throw new Error('Wander wallet required for Turbo upload.');
+    if (typeof wallet.signDataItem === 'function') {
+      const fileToUpload: File =
+        typeof File !== 'undefined' && args.file instanceof File
+          ? args.file
+          : new File([args.file], 'streamvault-upload', { type: args.file.type || 'application/octet-stream' });
+      const signedDataItem = await wallet.signDataItem({
+        data: new Uint8Array(await fileToUpload.arrayBuffer()),
+        tags: dedupeArweaveTags(args.tags),
+      });
+      const signedBytes = normalizeSignedDataItemBytes(signedDataItem);
+      const { DataItem } = await import('@dha-team/arbundles');
+      const dataItem = new DataItem(signedBytes as any);
+      turbo = TurboFactory.unauthenticated({ token: 'arweave' });
+      const result = await turbo.uploadSignedDataItem({
+        dataItemStreamFactory: () =>
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(signedBytes);
+              controller.close();
+            },
+          }),
+        dataItemSizeFactory: () => signedBytes.byteLength,
+        events: {
+          onUploadProgress: ({ totalBytes, processedBytes }) => {
+            console.info('[turbo] Upload progress', { totalBytes, processedBytes });
+            args.onProgress?.({ totalBytes, processedBytes });
+          },
+          onUploadError: (error) => {
+            console.error('[turbo] Upload error', error);
+          },
+          onUploadSuccess: () => {
+            console.info('[turbo] Upload success');
+          },
+        },
+      });
+      return result?.id || dataItem.id;
+    }
     const signer = new ArconnectSigner(wallet);
     turbo = TurboFactory.authenticated({ signer });
   } else if (args.paymentToken === 'solana') {
