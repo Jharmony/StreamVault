@@ -1,10 +1,31 @@
+import { useEffect, useState, type CSSProperties } from 'react';
 import { usePlayer } from '../context/PlayerContext';
 import styles from './NowPlayingBar.module.css';
 
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
 export function NowPlayingBar() {
-  const { currentTrack, isPlaying, progress, toggle, seek } = usePlayer();
+  const { currentTrack, isPlaying, progress, currentTime, duration, canSeek, toggle, seekTo } = usePlayer();
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [draftTime, setDraftTime] = useState(0);
+
+  useEffect(() => {
+    if (!isScrubbing) setDraftTime(currentTime);
+  }, [currentTime, isScrubbing]);
 
   if (!currentTrack) return null;
+  const sliderValue = canSeek ? (isScrubbing ? draftTime : currentTime) : 0;
+  const sliderProgress = duration ? (sliderValue / duration) * 100 : progress;
+  const commitSeek = (value: number) => {
+    setIsScrubbing(false);
+    setDraftTime(value);
+    seekTo(value);
+  };
 
   return (
     <div className={styles.bar + ' glass-strong'}>
@@ -31,11 +52,30 @@ export function NowPlayingBar() {
           <input
             type="range"
             min={0}
-            max={100}
-            value={progress}
-            onChange={(e) => seek(Number(e.target.value))}
+            max={duration || 100}
+            step={0.1}
+            value={sliderValue}
+            onPointerDown={() => setIsScrubbing(true)}
+            onPointerUp={(e) => commitSeek(Number(e.currentTarget.value))}
+            onTouchEnd={(e) => commitSeek(Number(e.currentTarget.value))}
+            onBlur={(e) => {
+              if (isScrubbing) commitSeek(Number(e.currentTarget.value));
+            }}
+            onKeyUp={(e) => commitSeek(Number(e.currentTarget.value))}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              setDraftTime(next);
+              if (!isScrubbing) seekTo(next);
+            }}
             className={styles.progress}
+            disabled={!canSeek}
+            style={{ '--progress': `${Math.max(0, Math.min(100, sliderProgress))}%` } as CSSProperties}
+            aria-label="Seek track"
           />
+          <div className={styles.timeRow}>
+            <span>{formatTime(currentTime)}</span>
+            <span>{duration ? formatTime(duration) : '--:--'}</span>
+          </div>
         </div>
       </div>
       <div className={styles.badges}>
