@@ -1,0 +1,140 @@
+.comments {
+  padding: 20px 24px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-md);
+}
+
+.header,
+.formFooter,
+.connectBox,
+.commentMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+}
+
+.note,
+.empty,
+.count {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.refreshBtn,
+.postBtn {
+  border: 1px solid var(--bg-glass-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  font-weight: var(--font-medium);
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.postBtn {
+  background: rgba(124, 92, 255, 0.16);
+  color: var(--accent);
+}
+
+.refreshBtn:disabled,
+.postBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.form {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.textarea {
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid var(--bg-glass-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  padding: 12px;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.textarea:focus {
+  outline: 2px solid rgba(124, 92, 255, 0.45);
+  outline-offset: 2px;
+}
+
+.connectBox {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--bg-glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.comment {
+  padding: 12px;
+  border: 1px solid var(--bg-glass-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.commentMeta {
+  justify-content: flex-start;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.commentMeta a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.commentBody {
+  margin-top: 8px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.notice {
+  margin-top: 12px;
+  color: var(--permanent);
+  font-size: var(--text-sm);
+}
+
+.error,
+.countError {
+  color: var(--error);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 640px) {
+  .header,
+  .formFooter,
+  .connectBox {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .refreshBtn,
+  .postBtn {
+    width: 100%;
+  }
+}
