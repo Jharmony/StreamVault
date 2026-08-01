@@ -145,6 +145,56 @@ export async function readUcmOrderbookInfo(orderbookId: string): Promise<Record<
   return readDedicatedOrderbookInfo(orderbookId);
 }
 
+const ASSET_ORDERBOOK_DRYRUN_COOLDOWN_MS = 60_000;
+const assetOrderbookDryrunMissUntil = new Map<string, number>();
+const assetOrderbookDryrunInFlight = new Map<string, Promise<string | null>>();
+
+function assetOrderbookDryrunCoolingDown(assetId: string): boolean {
+  const until = assetOrderbookDryrunMissUntil.get(assetId) || 0;
+  if (until <= Date.now()) {
+    if (until) assetOrderbookDryrunMissUntil.delete(assetId);
+    return false;
+  }
+  return true;
+}
+
+async function discoverAssetOrderbookIdViaDryrun(assetId: string): Promise<string | null> {
+  const id = String(assetId || '').trim();
+  if (!id || assetOrderbookDryrunCoolingDown(id)) return null;
+  const inFlight = assetOrderbookDryrunInFlight.get(id);
+  if (inFlight) return inFlight;
+
+  const read = (async () => {
+    try {
+      const deps = buildUcmDeps(null);
+      const res: any = await deps.ao.dryrun({
+        process: id,
+        tags: [{ name: 'Action', value: 'Info' }],
+      });
+      const message = res?.Messages?.[0];
+      if (message?.Data) {
+        const parsed = JSON.parse(message.Data);
+        const fromDryrun = readOrderbookIdFromAssetJson(
+          parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null
+        );
+        if (fromDryrun) return fromDryrun;
+      }
+    } catch {
+      // This fallback is noisy on broken/foreign processes; cool down before retrying.
+    }
+    assetOrderbookDryrunMissUntil.set(id, Date.now() + ASSET_ORDERBOOK_DRYRUN_COOLDOWN_MS);
+    return null;
+  })();
+
+  assetOrderbookDryrunInFlight.set(id, read);
+  void read.then(() => {
+    if (assetOrderbookDryrunInFlight.get(id) === read) assetOrderbookDryrunInFlight.delete(id);
+  }, () => {
+    if (assetOrderbookDryrunInFlight.get(id) === read) assetOrderbookDryrunInFlight.delete(id);
+  });
+  return read;
+}
+
 export async function readAssetOrderbookId(assetId: string): Promise<string | null> {
   const id = String(assetId || '').trim();
   if (!id) return null;
@@ -162,25 +212,10 @@ export async function readAssetOrderbookId(assetId: string): Promise<string | nu
     return fromHb;
   }
 
-  try {
-    const deps = buildUcmDeps(null);
-    const res: any = await deps.ao.dryrun({
-      process: id,
-      tags: [{ name: 'Action', value: 'Info' }],
-    });
-    const message = res?.Messages?.[0];
-    if (message?.Data) {
-      const parsed = JSON.parse(message.Data);
-      const fromDryrun = readOrderbookIdFromAssetJson(
-        parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null
-      );
-      if (fromDryrun) {
-        rememberAssetOrderbookId(id, fromDryrun);
-        return fromDryrun;
-      }
-    }
-  } catch {
-    // ignore
+  const fromDryrun = await discoverAssetOrderbookIdViaDryrun(id);
+  if (fromDryrun) {
+    rememberAssetOrderbookId(id, fromDryrun);
+    return fromDryrun;
   }
 
   return null;

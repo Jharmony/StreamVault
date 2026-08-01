@@ -339,6 +339,9 @@ export async function readDedicatedOrderbookInfo(
 
 /** Same as readDedicatedOrderbookInfo but includes which read path succeeded (for debugging). */
 const ORDERBOOK_READ_TIMEOUT_MS = 10_000;
+const ORDERBOOK_READ_CACHE_MS = 8_000;
+const orderbookReadCache = new Map<string, { until: number; value: DedicatedOrderbookRead }>();
+const orderbookReadInFlight = new Map<string, Promise<DedicatedOrderbookRead>>();
 
 async function readDedicatedOrderbookInfoDetailedInner(
   orderbookId: string
@@ -393,13 +396,32 @@ async function readDedicatedOrderbookInfoDetailedInner(
 export async function readDedicatedOrderbookInfoDetailed(
   orderbookId: string
 ): Promise<DedicatedOrderbookRead> {
-  if (!orderbookId.trim()) return { info: null, source: 'none' };
-  return Promise.race([
+  const id = orderbookId.trim();
+  if (!id) return { info: null, source: 'none' };
+  const cached = orderbookReadCache.get(id);
+  if (cached && cached.until > Date.now()) return cached.value;
+  if (cached) orderbookReadCache.delete(id);
+
+  const inFlight = orderbookReadInFlight.get(id);
+  if (inFlight) return inFlight;
+
+  const read = Promise.race([
     readDedicatedOrderbookInfoDetailedInner(orderbookId),
     new Promise<DedicatedOrderbookRead>((resolve) => {
       setTimeout(() => resolve({ info: null, source: 'none' }), ORDERBOOK_READ_TIMEOUT_MS);
     }),
-  ]);
+  ]).then((value) => {
+    orderbookReadCache.set(id, { until: Date.now() + ORDERBOOK_READ_CACHE_MS, value });
+    return value;
+  });
+
+  orderbookReadInFlight.set(id, read);
+  void read.then(() => {
+    if (orderbookReadInFlight.get(id) === read) orderbookReadInFlight.delete(id);
+  }, () => {
+    if (orderbookReadInFlight.get(id) === read) orderbookReadInFlight.delete(id);
+  });
+  return read;
 }
 
 function mapRawAsk(

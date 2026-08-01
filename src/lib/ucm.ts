@@ -878,6 +878,9 @@ async function readHolderBalanceViaDryrun(
 ): Promise<number> {
   const holder = normalizeAddr(holderId);
   if (!holder) return 0;
+  const cacheKey = `${String(assetId || '').trim()}:${holder}`;
+  const cached = readCooldownCache(holderBalanceDryrunCache, cacheKey);
+  if (cached !== undefined) return cached;
   try {
     const res: any = await deps.ao.dryrun({
       process: assetId,
@@ -886,8 +889,12 @@ async function readHolderBalanceViaDryrun(
         { name: 'Recipient', value: holder },
       ],
     });
-    return parseBalanceActionResponse(res?.Messages?.[0]);
+    const parsed = parseBalanceActionResponse(res?.Messages?.[0]);
+    if (parsed > 0) holderBalanceDryrunCache.delete(cacheKey);
+    else writeCooldownCache(holderBalanceDryrunCache, cacheKey, 0);
+    return parsed;
   } catch {
+    writeCooldownCache(holderBalanceDryrunCache, cacheKey, 0);
     return 0;
   }
 }
@@ -1274,6 +1281,7 @@ async function waitForWalletAskOnOrderbook(args: {
       assetId: args.assetId,
       walletAddress: args.walletAddress,
       profileId: args.profileId,
+      probeHolderBalance: true,
     }).catch(() => null);
     return (postBalance?.escrowedCopies || 0) > 0;
   };
@@ -2173,7 +2181,7 @@ export async function ensureCreatorAssetBalance(args: {
       profileId,
     };
   } else {
-    current = await fetchSellerAssetBalance(args);
+    current = await fetchSellerAssetBalance({ ...args, probeHolderBalance: true });
     if (!current.inferredFromCreator && current.copies > 0) return current;
     const hb = await withBalanceTimeout(fetchHyperbeamAssetState(args.assetId));
     hbJson = (hb?.json || null) as Record<string, unknown> | null;
@@ -2241,7 +2249,7 @@ export async function ensureCreatorAssetBalance(args: {
     operatorBackground: true,
   }).catch(() => {});
   await sleep(1200);
-  current = await fetchSellerAssetBalance(args);
+  current = await fetchSellerAssetBalance({ ...args, probeHolderBalance: true });
   if (!current.inferredFromCreator && current.copies > 0) return current;
 
   args.onStatus?.({
@@ -2284,7 +2292,7 @@ export async function ensureCreatorAssetBalance(args: {
   }).catch(() => {});
   for (let attempt = 0; attempt < 8; attempt++) {
     await sleep(1500);
-    current = await fetchSellerAssetBalance(args);
+    current = await fetchSellerAssetBalance({ ...args, probeHolderBalance: true });
     if (!current.inferredFromCreator && current.copies > 0) {
       args.onStatus?.({
         processing: true,
@@ -2309,10 +2317,31 @@ export async function ensureCreatorAssetBalance(args: {
 
 /** Read seller balance for an atomic asset from HyperBEAM (whole copies). */
 const BALANCE_READ_TIMEOUT_MS = 4_000;
+const BALANCE_FAILED_DRYRUN_COOLDOWN_MS = 60_000;
+
+type CooldownCacheEntry<T> = { until: number; value: T };
+const assetInfoDryrunCache = new Map<string, CooldownCacheEntry<Record<string, unknown> | null>>();
+const holderBalanceDryrunCache = new Map<string, CooldownCacheEntry<number>>();
+
+function readCooldownCache<T>(cache: Map<string, CooldownCacheEntry<T>>, key: string): T | undefined {
+  const hit = cache.get(key);
+  if (!hit) return undefined;
+  if (hit.until <= Date.now()) {
+    cache.delete(key);
+    return undefined;
+  }
+  return hit.value;
+}
+
+function writeCooldownCache<T>(cache: Map<string, CooldownCacheEntry<T>>, key: string, value: T) {
+  cache.set(key, { until: Date.now() + BALANCE_FAILED_DRYRUN_COOLDOWN_MS, value });
+}
 
 async function dryrunAssetInfo(assetId: string): Promise<Record<string, unknown> | null> {
   const id = String(assetId || '').trim();
   if (!id) return null;
+  const cached = readCooldownCache(assetInfoDryrunCache, id);
+  if (cached !== undefined) return cached;
   const node = resolveAoNode();
   const readUrls = await resolveHbReadNodeUrlsForProcess(id).catch(() => resolveHbReadNodeUrls());
   const preferred = new Set(
@@ -2355,13 +2384,17 @@ async function dryrunAssetInfo(assetId: string): Promise<Record<string, unknown>
   );
 
   const hits = candidates.filter(Boolean) as Cand[];
-  if (hits.length === 0) return null;
+  if (hits.length === 0) {
+    writeCooldownCache(assetInfoDryrunCache, id, null);
+    return null;
+  }
   // Prefer scheduler-matching node, then any non-empty Balances peer, then first hit.
   hits.sort((a, b) => {
     if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
     if (a.rich !== b.rich) return a.rich ? -1 : 1;
     return 0;
   });
+  assetInfoDryrunCache.delete(id);
   return hits[0].json;
 }
 
@@ -2381,6 +2414,8 @@ export async function fetchSellerAssetBalance(args: {
   balanceHolderId?: string | null;
   /** L1 / UI creator hint when HB Creator field is still missing. */
   creatorHint?: string | null;
+  /** Active listing/repair flows may probe Action=Balance; passive page loads should avoid console spam. */
+  probeHolderBalance?: boolean;
 }): Promise<SellerAssetBalance> {
   const wallet = normalizeAddr(args.walletAddress);
   const profileId = normalizeAddr(args.profileId) || null;
@@ -2486,24 +2521,26 @@ export async function fetchSellerAssetBalance(args: {
     }, creatorIsProfile ? 'infer-creator-profile' : 'infer-creator');
   }
 
-  const deps = buildUcmDeps(null);
-  const holdersToProbe = explicitHolder
-    ? [explicitHolder]
-    : [wallet, profileId].filter((id, i, arr): id is string => Boolean(id) && arr.indexOf(id) === i);
+  if (args.probeHolderBalance) {
+    const deps = buildUcmDeps(null);
+    const holdersToProbe = explicitHolder
+      ? [explicitHolder]
+      : [wallet, profileId].filter((id, i, arr): id is string => Boolean(id) && arr.indexOf(id) === i);
 
-  for (const holder of holdersToProbe) {
-    const fromBalanceAction = await withBalanceTimeout(
-      readHolderBalanceViaDryrun(args.assetId, holder, deps)
-    );
-    if (fromBalanceAction != null && fromBalanceAction > 0) {
-      return finish({
-        copies: fromBalanceAction,
-        walletCopies: holder === wallet ? fromBalanceAction : 0,
-        profileCopies: holder === profileId ? fromBalanceAction : 0,
-        inferredFromCreator: false,
-        profileId,
-        totalSupply: totalSupply > 0 ? totalSupply : undefined,
-      }, holder === profileId ? 'dryrun-profile-Balance' : 'dryrun-Balance-action');
+    for (const holder of holdersToProbe) {
+      const fromBalanceAction = await withBalanceTimeout(
+        readHolderBalanceViaDryrun(args.assetId, holder, deps)
+      );
+      if (fromBalanceAction != null && fromBalanceAction > 0) {
+        return finish({
+          copies: fromBalanceAction,
+          walletCopies: holder === wallet ? fromBalanceAction : 0,
+          profileCopies: holder === profileId ? fromBalanceAction : 0,
+          inferredFromCreator: false,
+          profileId,
+          totalSupply: totalSupply > 0 ? totalSupply : undefined,
+        }, holder === profileId ? 'dryrun-profile-Balance' : 'dryrun-Balance-action');
+      }
     }
   }
 
@@ -2539,7 +2576,7 @@ export async function waitForConfirmedSellerBalance(args: {
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
-    const balance = await fetchSellerAssetBalance(args);
+    const balance = await fetchSellerAssetBalance({ ...args, probeHolderBalance: true });
     if (!balance.inferredFromCreator && balance.copies >= minCopies) {
       return balance;
     }
@@ -2562,7 +2599,7 @@ export async function waitForConfirmedSellerBalance(args: {
     await sleep(2000);
   }
 
-  const last = await fetchSellerAssetBalance(args);
+  const last = await fetchSellerAssetBalance({ ...args, probeHolderBalance: true });
   if (last.copies >= minCopies) {
     args.onStatus?.({
       processing: true,

@@ -66,6 +66,13 @@ const ANS110_TYPE_IMAGE = 'image';
 /** Stable tag used to link an audio tx back to a separately uploaded cover artwork tx. */
 export const STREAMVAULT_ARTWORK_TX_TAG = 'Artwork-Tx-Id';
 
+const publishDebug =
+  import.meta.env.DEV && String(import.meta.env.VITE_DEBUG_PUBLISH || '') === '1';
+
+function publishInfo(message: string, data?: unknown) {
+  if (publishDebug) console.info(message, data);
+}
+
 function ans110Title(s: string): string {
   const t = nfc(s).trim();
   if (t.length <= ANS110_MAX_TITLE) return t;
@@ -238,7 +245,7 @@ async function resolveAtomicMintLibs(
       mode: 'mainnet',
     });
     if (writable?.createAtomicAsset) {
-      console.info('[publish] Atomic mint using Portal write libs', {
+      publishInfo('[publish] Atomic mint using Portal write libs', {
         writeUrl,
         scheduler: node.scheduler,
         // Full id — earlier logs sliced to 12 chars and looked "too short".
@@ -332,14 +339,14 @@ async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
         dataItemSizeFactory: () => signedBytes.byteLength,
         events: {
           onUploadProgress: ({ totalBytes, processedBytes }) => {
-            console.info('[turbo] Upload progress', { totalBytes, processedBytes });
+            publishInfo('[turbo] Upload progress', { totalBytes, processedBytes });
             args.onProgress?.({ totalBytes, processedBytes });
           },
           onUploadError: (error) => {
             console.error('[turbo] Upload error', error);
           },
           onUploadSuccess: () => {
-            console.info('[turbo] Upload success');
+            publishInfo('[turbo] Upload success');
           },
         },
       });
@@ -370,20 +377,20 @@ async function uploadWithTurbo(args: TurboUploadOptions): Promise<string> {
       ? args.file
       : new File([args.file], 'streamvault-upload', { type: args.file.type || 'application/octet-stream' });
 
-  console.info('[turbo] Uploading file', { size: args.file.size });
+  publishInfo('[turbo] Uploading file', { size: args.file.size });
   const result = await turbo.uploadFile({
     file: fileToUpload,
     dataItemOpts: { tags: dedupeArweaveTags(args.tags) },
     events: {
       onUploadProgress: ({ totalBytes, processedBytes }) => {
-        console.info('[turbo] Upload progress', { totalBytes, processedBytes });
+        publishInfo('[turbo] Upload progress', { totalBytes, processedBytes });
         args.onProgress?.({ totalBytes, processedBytes });
       },
       onUploadError: (error) => {
         console.error('[turbo] Upload error', error);
       },
       onUploadSuccess: () => {
-        console.info('[turbo] Upload success');
+        publishInfo('[turbo] Upload success');
       },
     },
   });
@@ -456,7 +463,7 @@ export async function createFiatTopUpSession(args: {
     `https://payment.ardrive.io/v1/top-up/checkout-session/${args.ownerAddress}/usd/${amountCents}` +
     `?token=arweave&uiMode=hosted&successUrl=${successUrl}&cancelUrl=${cancelUrl}`;
 
-  console.info('[publish] Fetching Turbo checkout session', { amountCents, owner: args.ownerAddress });
+  publishInfo('[publish] Fetching Turbo checkout session', { amountCents, owner: args.ownerAddress });
 
   const res = await fetch(url);
   if (!res.ok) {
@@ -497,14 +504,14 @@ async function uploadDataTx(
     tx.addTag('Content-Type', contentType);
   }
 
-  console.info('[arweave] Signing transaction', { contentType, dataBytes: data.byteLength });
+  publishInfo('[arweave] Signing transaction', { contentType, dataBytes: data.byteLength });
   const signedTx = await wallet.sign(tx);
   const txToPost = signedTx || tx;
-  console.info('[arweave] Posting transaction', { id: (txToPost as any).id || tx.id });
+  publishInfo('[arweave] Posting transaction', { id: (txToPost as any).id || tx.id });
   const response = await arweave.transactions.post(txToPost as any);
   if (response.status >= 400) throw new Error(`Upload failed: ${response.status}`);
   const txId = (txToPost as any).id || tx.id;
-  console.info('[arweave] Transaction accepted', { status: response.status, txId });
+  publishInfo('[arweave] Transaction accepted', { status: response.status, txId });
   return txId;
 }
 
@@ -757,7 +764,7 @@ export async function publishSampleToArweave(
 ): Promise<PublishResult> {
   try {
     opts?.onStage?.('preparing');
-    console.info('[publish] Sample publish started', { title: args.title, artist: args.artist });
+    publishInfo('[publish] Sample publish started', { title: args.title, artist: args.artist });
     const data = await args.sample.arrayBuffer();
     const tags: { name: string; value: string }[] = [
       { name: 'App-Name', value: 'StreamVault' },
@@ -786,7 +793,7 @@ export async function publishSampleToArweave(
       preferTurbo: false,
     }).catch(() => false);
     const permawebUrl = arweaveTxDataUrl(txId);
-    console.info('[publish] Sample publish complete', { txId, permawebUrl });
+    publishInfo('[publish] Sample publish complete', { txId, permawebUrl });
     opts?.onStage?.('done');
     return { success: true, txId, permawebUrl, arioUrl: turboTxDataUrl(txId), confirmed, gatewayReady };
   } catch (e: any) {
@@ -857,7 +864,7 @@ export async function publishFullAsAtomicAsset(
     const artist = nfc(args.artist);
     const atomicSupply = Math.max(1, Math.floor(args.atomicSupply || 1));
     const atomicDenomination = Math.max(1, Math.floor(args.atomicDenomination || 1));
-    console.info('[publish] Full asset publish started', { title, artist });
+    publishInfo('[publish] Full asset publish started', { title, artist });
     const udl = args.udl;
     const splits = args.splits;
     let artworkUrlToUse = args.artworkUrl;
@@ -866,7 +873,7 @@ export async function publishFullAsAtomicAsset(
     const turboToken = args.turboPaymentToken || 'arweave';
     if (args.artworkFile) {
       opts?.onStage?.('uploading-cover');
-      console.info('[publish] Uploading cover image', { turbo: !!args.useTurbo });
+      publishInfo('[publish] Uploading cover image', { turbo: !!args.useTurbo });
       const uploaded = args.useTurbo
         ? await uploadArtworkWithTurbo({
             artwork: args.artworkFile,
@@ -880,13 +887,13 @@ export async function publishFullAsAtomicAsset(
       opts?.onArtworkTxId?.(uploaded.txId);
       artworkUrlToUse = uploaded.permawebUrl;
       if (!uploaded.confirmed || !uploaded.gatewayReady) {
-        console.info('[publish] Artwork uploaded but still propagating', uploaded);
+        publishInfo('[publish] Artwork uploaded but still propagating', uploaded);
       }
     } else if (typeof args.artworkUrl === 'string' && args.artworkUrl.trim()) {
       // Audius artwork URLs generally allow CORS, but if it fails we fall back to using the remote URL.
       try {
         opts?.onStage?.('uploading-cover');
-        console.info('[publish] Uploading cover image (remote URL)', { turbo: !!args.useTurbo });
+        publishInfo('[publish] Uploading cover image (remote URL)', { turbo: !!args.useTurbo });
         const { blob } = await fetchArtworkAsBlob(args.artworkUrl);
         const uploaded = args.useTurbo
           ? await uploadArtworkWithTurbo({
@@ -901,7 +908,7 @@ export async function publishFullAsAtomicAsset(
         opts?.onArtworkTxId?.(uploaded.txId);
         artworkUrlToUse = uploaded.permawebUrl;
         if (!uploaded.confirmed || !uploaded.gatewayReady) {
-          console.info('[publish] Artwork uploaded but still propagating', uploaded);
+          publishInfo('[publish] Artwork uploaded but still propagating', uploaded);
         }
       } catch (e) {
         console.warn('[publish] Could not fetch/upload artwork URL; keeping original artworkUrl', e);
@@ -995,10 +1002,10 @@ export async function publishFullAsAtomicAsset(
       // but `/tx/<id>/status` is not a reliable confirmation endpoint for that id.
       // Treat Turbo upload success as accepted and verify availability via data URL probing instead.
       confirmed = true;
-      console.info('[publish] Turbo upload accepted; skipping raw tx status polling', { txId });
+      publishInfo('[publish] Turbo upload accepted; skipping raw tx status polling', { txId });
     } else {
       opts?.onStage?.('confirming');
-      console.info('[publish] Waiting for L1 confirmation (GraphQL discovery is usually post-confirmation)', {
+      publishInfo('[publish] Waiting for L1 confirmation (GraphQL discovery is usually post-confirmation)', {
         txId,
         confirmTimeoutMs,
       });
@@ -1011,7 +1018,7 @@ export async function publishFullAsAtomicAsset(
           240_000,
           Math.max(90_000, Math.floor((args.audio.size / (1024 * 1024)) * 45_000) + 60_000)
         );
-    console.info('[publish] Waiting for gateway audio availability', {
+    publishInfo('[publish] Waiting for gateway audio availability', {
       txId,
       gatewayReadyTimeoutMs,
       preferTurbo: usedTurboUpload,
@@ -1024,7 +1031,7 @@ export async function publishFullAsAtomicAsset(
       { preferTurbo: usedTurboUpload }
     ).catch(() => false);
     if (!gatewayReady && usedTurboUpload) {
-      console.info(
+      publishInfo(
         '[publish] Gateway audio not confirmed yet after Turbo upload; continuing (Turbo accepted the data item)',
         { txId }
       );
@@ -1154,7 +1161,7 @@ export async function publishFullAsAtomicAsset(
         timeoutMs: isTransientAtomicMintError(mintError) || !mintError ? 180_000 : 60_000,
         onTick: (elapsedMs) => {
           if (elapsedMs > 0 && elapsedMs % 20_000 < 5_000) {
-            console.info('[publish] Waiting for atomic asset index…', {
+            publishInfo('[publish] Waiting for atomic asset index…', {
               txId,
               elapsedSec: Math.round(elapsedMs / 1000),
             });
@@ -1162,7 +1169,7 @@ export async function publishFullAsAtomicAsset(
         },
       });
       if (recovered) {
-        console.info('[publish] Atomic mint recovered after delay', { txId, assetId: recovered });
+        publishInfo('[publish] Atomic mint recovered after delay', { txId, assetId: recovered });
         assetId = recovered;
         mintError = null;
       }
@@ -1193,7 +1200,7 @@ export async function publishFullAsAtomicAsset(
       };
     }
 
-    console.info('[publish] Full asset publish complete', { txId, assetId, permawebUrl });
+    publishInfo('[publish] Full asset publish complete', { txId, assetId, permawebUrl });
 
     // Best-effort AO registration for discovery and royalty engine usage.
     try {
