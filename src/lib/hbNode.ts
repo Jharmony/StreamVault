@@ -12,6 +12,8 @@ export const HB_REQUEST_TIMEOUT_MS = 8_000;
  * before accepting the fast peer (covers Portal-owned assets answered early by Bazar).
  */
 export const HB_OWNER_PREFER_GRACE_MS = 3_000;
+const HB_FAILED_READ_COOLDOWN_MS = 60_000;
+const HB_SUCCESS_READ_CACHE_MS = 5_000;
 
 type HbRequestArgs = {
   url: string;
@@ -21,6 +23,16 @@ type HbRequestArgs = {
   label?: string;
   forceLog?: boolean;
   timeoutMs?: number;
+  cacheTtlMs?: number;
+  noCache?: boolean;
+};
+
+type HbRequestResult = {
+  status: number;
+  ok: boolean;
+  contentType: string;
+  json: any | null;
+  text: string;
 };
 
 /** Headers permaweb-libs uses for HyperBEAM JSON reads. */
@@ -60,56 +72,121 @@ function safeJsonParse(text: string): any | null {
   }
 }
 
-export async function hbRequest(args: HbRequestArgs): Promise<{
-  status: number;
-  ok: boolean;
-  contentType: string;
-  json: any | null;
-  text: string;
-}> {
+const failedHbReadCooldownUntil = new Map<string, number>();
+const hbSuccessReadCache = new Map<string, { until: number; value: HbRequestResult }>();
+const hbReadInFlight = new Map<string, Promise<HbRequestResult>>();
+
+function hbFailureCacheKey(method: string, url: string): string {
+  return `${method.toUpperCase()} ${url}`;
+}
+
+function hbReadCacheKey(method: string, url: string, body: string | undefined): string {
+  return `${method.toUpperCase()} ${url} ${body || ''}`;
+}
+
+function hbReadIsCoolingDown(method: string, url: string): boolean {
+  const until = failedHbReadCooldownUntil.get(hbFailureCacheKey(method, url)) || 0;
+  if (until <= Date.now()) {
+    if (until) failedHbReadCooldownUntil.delete(hbFailureCacheKey(method, url));
+    return false;
+  }
+  return true;
+}
+
+function markHbReadFailure(method: string, url: string) {
+  failedHbReadCooldownUntil.set(hbFailureCacheKey(method, url), Date.now() + HB_FAILED_READ_COOLDOWN_MS);
+}
+
+function clearHbReadFailure(method: string, url: string) {
+  failedHbReadCooldownUntil.delete(hbFailureCacheKey(method, url));
+}
+
+export async function hbRequest(args: HbRequestArgs): Promise<HbRequestResult> {
   const method = args.method || 'GET';
   const headers = args.headers || {};
   const body = args.body;
   const log = shouldLog(args.forceLog);
-
-  if (log) {
-    console.info('[hb:req]', {
-      label: args.label || '',
-      url: args.url,
-      method,
-      headers,
-      body: body ?? null,
-    });
+  const cacheEnabled = !args.forceLog && !args.noCache;
+  const cacheKey = hbReadCacheKey(method, args.url, body);
+  if (cacheEnabled) {
+    const cached = hbSuccessReadCache.get(cacheKey);
+    if (cached && cached.until > Date.now()) return cached.value;
+    if (cached) hbSuccessReadCache.delete(cacheKey);
+    const inFlight = hbReadInFlight.get(cacheKey);
+    if (inFlight) return inFlight;
+  }
+  if (!args.forceLog && hbReadIsCoolingDown(method, args.url)) {
+    throw new Error(`HyperBEAM read cooling down after recent failure: ${args.label || args.url}`);
   }
 
-  const res = await fetch(args.url, {
-    method,
-    headers,
-    body,
-    signal: AbortSignal.timeout(args.timeoutMs ?? HB_REQUEST_TIMEOUT_MS),
-  });
-  const contentType = res.headers.get('content-type') || '';
-  const text = await res.text();
-  const json = contentType.includes('application/json') ? safeJsonParse(text) : null;
+  const request = (async (): Promise<HbRequestResult> => {
+    if (log) {
+      console.info('[hb:req]', {
+        label: args.label || '',
+        url: args.url,
+        method,
+        headers,
+        body: body ?? null,
+      });
+    }
 
-  if (log) {
-    console.info('[hb:res]', {
-      label: args.label || '',
-      url: args.url,
-      method,
+    let res: Response;
+    let contentType = '';
+    let text = '';
+    let json: any | null = null;
+    try {
+      res = await fetch(args.url, {
+        method,
+        headers,
+        body,
+        signal: AbortSignal.timeout(args.timeoutMs ?? HB_REQUEST_TIMEOUT_MS),
+      });
+      contentType = res.headers.get('content-type') || '';
+      text = await res.text();
+      json = contentType.includes('application/json') ? safeJsonParse(text) : null;
+      if (!res.ok) markHbReadFailure(method, args.url);
+      else clearHbReadFailure(method, args.url);
+    } catch (error) {
+      markHbReadFailure(method, args.url);
+      throw error;
+    }
+
+    if (log) {
+      console.info('[hb:res]', {
+        label: args.label || '',
+        url: args.url,
+        method,
+        status: res.status,
+        contentType,
+        body: json ?? text,
+      });
+    }
+
+    const result = {
       status: res.status,
+      ok: res.ok,
       contentType,
-      body: json ?? text,
+      json,
+      text,
+    };
+    if (cacheEnabled && result.ok) {
+      hbSuccessReadCache.set(cacheKey, {
+        until: Date.now() + (args.cacheTtlMs ?? HB_SUCCESS_READ_CACHE_MS),
+        value: result,
+      });
+    }
+    return result;
+  })();
+
+  if (cacheEnabled) {
+    hbReadInFlight.set(cacheKey, request);
+    void request.then(() => {
+      if (hbReadInFlight.get(cacheKey) === request) hbReadInFlight.delete(cacheKey);
+    }, () => {
+      if (hbReadInFlight.get(cacheKey) === request) hbReadInFlight.delete(cacheKey);
     });
   }
-
-  return {
-    status: res.status,
-    ok: res.ok,
-    contentType,
-    json,
-    text,
-  };
+  return request;
 }
 
 export async function runHbNodeDiagnostics(pid: string, nodeBase: string) {

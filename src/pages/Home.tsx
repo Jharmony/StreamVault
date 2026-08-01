@@ -49,6 +49,11 @@ import {
   type StreamVaultTrack,
 } from '../../packages/streamvault-sdk/src';
 
+const profileDebug =
+  import.meta.env.DEV &&
+  (String(import.meta.env.VITE_DEBUG_PROFILE || '') === '1' ||
+    String(import.meta.env.VITE_DEBUG_PERMAWEB || '') === '1');
+
 function mapAudiusToTrack(a: AudiusTrack): Track {
   return {
     id: a.id,
@@ -339,10 +344,10 @@ export function Home() {
     setCreating(true);
     setCreateError(null);
     try {
-      console.info('[profile] create start', { address, audiusHandle: form.audiusHandle });
+      if (profileDebug) console.info('[profile] create start', { address, audiusHandle: form.audiusHandle });
       const existing = await getSelectedOrLatestProfileByWallet(libs, address);
       if (existing?.id) {
-        console.info('[profile] existing profile found', { profileId: existing.id });
+        if (profileDebug) console.info('[profile] existing profile found', { profileId: existing.id });
         setCreateError('Profile already exists for this wallet. Open your profile to view it.');
         setCreateOpen(false);
         return;
@@ -353,7 +358,7 @@ export function Home() {
       const writableLibs = await getWritableProfileLibs(getWritableLibs);
       const args = await buildPermawebProfileArgs(form, fileToDataURL, writableLibs);
       const profileId = await writableLibs.createProfile(args);
-      console.info('[profile] create success', { profileId });
+      if (profileDebug) console.info('[profile] create success', { profileId });
       if (!profileId) throw new Error('permaweb-libs createProfile returned no profile id.');
       if (form.audiusHandle?.trim()) {
         await applyProfileZoneExtras(writableLibs, profileId, {

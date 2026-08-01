@@ -312,7 +312,7 @@ export function ListOnUcm({
       cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
     };
-  }, [address, assetCreatorHint, ucmAssetId, profileId, selectedQuoteToken.id, walletType]);
+  }, [address, assetCreatorHint, ucmAssetId, profileId, walletType]);
 
   useEffect(() => {
     void refreshDedicatedOrderbook();
@@ -347,7 +347,12 @@ export function ListOnUcm({
           onStatus: setStatus,
         });
         await refreshActiveOrders();
-        const bal = await fetchSellerAssetBalance({ assetId, walletAddress: address, profileId }).catch(() => ({
+        const bal = await fetchSellerAssetBalance({
+          assetId,
+          walletAddress: address,
+          profileId,
+          probeHolderBalance: true,
+        }).catch(() => ({
           copies: 0,
           walletCopies: 0,
           profileCopies: 0,
@@ -454,6 +459,7 @@ export function ListOnUcm({
         walletAddress: address,
         profileId,
         creatorHint: assetCreatorHint,
+        probeHolderBalance: true,
       }).catch(() => null);
       if (bal) {
         setBalance(bal.copies);

@@ -461,34 +461,34 @@ export function Profile() {
   }, [avatarSources, bannerSources, avatarSourceIndex, bannerSourceIndex, profileDebug]);
 
   const handleAvatarImageErrorWithLog = useCallback(() => {
-    if (activeAvatarSource) {
+    if (profileDebug && activeAvatarSource) {
       console.warn('[profile] avatar image failed', {
         url: activeAvatarSource,
         next: avatarSources[avatarSourceIndex + 1] || null,
       });
     }
     handleAvatarImageError();
-  }, [activeAvatarSource, avatarSourceIndex, avatarSources, handleAvatarImageError]);
+  }, [activeAvatarSource, avatarSourceIndex, avatarSources, handleAvatarImageError, profileDebug]);
 
   const handleBannerImageErrorWithLog = useCallback(() => {
-    if (activeBannerSource) {
+    if (profileDebug && activeBannerSource) {
       console.warn('[profile] banner image failed', {
         url: activeBannerSource,
         next: bannerSources[bannerSourceIndex + 1] || null,
       });
     }
     handleBannerImageError();
-  }, [activeBannerSource, bannerSourceIndex, bannerSources, handleBannerImageError]);
+  }, [activeBannerSource, bannerSourceIndex, bannerSources, handleBannerImageError, profileDebug]);
 
   const handleAvatarImageLoad = useCallback(() => {
     handleAvatarImageLoaded();
-    if (activeAvatarSource) console.info('[profile] avatar image loaded', activeAvatarSource);
-  }, [activeAvatarSource, handleAvatarImageLoaded]);
+    if (profileDebug && activeAvatarSource) console.info('[profile] avatar image loaded', activeAvatarSource);
+  }, [activeAvatarSource, handleAvatarImageLoaded, profileDebug]);
 
   const handleBannerImageLoad = useCallback(() => {
     handleBannerImageLoaded();
-    if (activeBannerSource) console.info('[profile] banner image loaded', activeBannerSource);
-  }, [activeBannerSource, handleBannerImageLoaded]);
+    if (profileDebug && activeBannerSource) console.info('[profile] banner image loaded', activeBannerSource);
+  }, [activeBannerSource, handleBannerImageLoaded, profileDebug]);
 
   const profileAssets = useMemo(
     () => (normalizedProfile ? collectProfileAssetRefs(normalizedProfile) : []),

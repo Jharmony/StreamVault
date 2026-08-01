@@ -542,8 +542,7 @@ export function resolveProfileMediaUrl(raw: any): string | null {
   }
   const id = value.startsWith('ar://') ? value.slice(5) : value;
   if (/^[A-Za-z0-9_-]{43}$/.test(id)) return preferredArweaveStreamUrl(id);
-  if (value.startsWith('ar://')) return preferredArweaveStreamUrl(id);
-  return preferredArweaveStreamUrl(value);
+  return null;
 }
 
 export function resolveProfileMediaUrls(raw: any): string[] {
@@ -564,7 +563,7 @@ export function resolveProfileMediaUrls(raw: any): string[] {
     return [value];
   }
   const id = value.startsWith('ar://') ? value.slice(5) : value;
-  if (!/^[A-Za-z0-9_-]{43}$/.test(id)) return arweavePublicDataUrls(id);
+  if (!/^[A-Za-z0-9_-]{43}$/.test(id)) return [];
   return arweavePublicDataUrls(id);
 }
 

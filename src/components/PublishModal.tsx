@@ -20,6 +20,9 @@ import { PublishPrimaryUpload } from './publish/PublishPrimaryUpload';
 import { ListOnUcm } from './ListOnUcm';
 import styles from './PublishModal.module.css';
 
+const publishDebug =
+  import.meta.env.DEV && String(import.meta.env.VITE_DEBUG_PUBLISH || '') === '1';
+
 interface PublishModalProps {
   track?: Track;
   onClose: () => void;
@@ -591,7 +594,7 @@ export function PublishModal({ track, onClose, onSuccess }: PublishModalProps) {
       // Soft mint-pending messages are informational, not hard failures.
       if (res.error && !res.mintPending) setErrorMessage(res.error);
       else if (res.mintPending && res.error) setErrorMessage(null);
-      console.info('[publish] Result', res);
+      if (publishDebug) console.info('[publish] Result', res);
       if (res.success && res.txId && address) {
         try {
           const entryBase = {
